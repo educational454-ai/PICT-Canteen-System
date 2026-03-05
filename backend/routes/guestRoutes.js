@@ -6,7 +6,8 @@ const Faculty = require('../models/Faculty');
 // Create a new Guest Voucher
 router.post('/add', async (req, res) => {
     try {
-        const { guestName, facultyVoucher, validFrom, validTill } = req.body;
+        // FIXED: Added 'email' to the extracted variables!
+        const { guestName, email, facultyVoucher, validFrom, validTill } = req.body;
 
         // 1. Find the parent Faculty using their voucher
         const faculty = await Faculty.findOne({ voucherCode: facultyVoucher });
@@ -18,7 +19,7 @@ router.post('/add', async (req, res) => {
 
         const newGuest = new Guest({
             guestName,
-            email,
+            email, 
             voucherCode: guestVoucher,
             facultyId: faculty._id,
             departmentId: faculty.departmentId, 
@@ -31,6 +32,7 @@ router.post('/add', async (req, res) => {
         res.status(201).json({ message: "Guest Voucher Created!", voucher: guestVoucher });
 
     } catch (error) {
+        console.error("Backend Error in /guests/add:", error);
         res.status(400).json({ error: "Failed to create guest", details: error.message });
     }
 });

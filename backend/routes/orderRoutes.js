@@ -8,30 +8,77 @@ router.post('/place', async (req, res) => {
     try {
         const { voucherCode, items, totalAmount } = req.body;
         
+        // ==========================================
+        // SECURITY CHECK 1: CATEGORY LIMITS FOR TODAY
+        // ==========================================
+        const startOfDay = new Date();
+        startOfDay.setHours(0, 0, 0, 0); 
+        const endOfDay = new Date();
+        endOfDay.setHours(23, 59, 59, 999); 
+
+        // Fetch ALL orders placed by this voucher today
+        const todaysOrders = await Order.find({
+            voucherCode: voucherCode,
+            orderDate: { $gte: startOfDay, $lte: endOfDay }
+        });
+
+        // Build a list of categories they already ate today
+        const consumedCategories = new Set();
+        todaysOrders.forEach(order => {
+            order.items.forEach(item => {
+                if (item.category) consumedCategories.add(item.category);
+            });
+        });
+
+        // Check if the current cart has categories they already ate
+        for (let currentItem of items) {
+            if (consumedCategories.has(currentItem.category)) {
+                return res.status(400).json({ 
+                    error: `Limit Exceeded: You have already ordered an item from the '${currentItem.category}' category today.` 
+                });
+            }
+        }
+
+        // ==========================================
+        // SECURITY CHECK 2: VALIDATE VOUCHER
+        // ==========================================
         let targetFacultyId;
         let targetDepartmentId;
+        let validFrom, validTill, isActive;
 
-        // 1. Is this a Faculty Member?
         const faculty = await Faculty.findOne({ voucherCode: voucherCode });
-        
         if (faculty) {
             targetFacultyId = faculty._id;
             targetDepartmentId = faculty.departmentId;
+            validFrom = new Date(faculty.validFrom);
+            validTill = new Date(faculty.validTill);
+            isActive = faculty.isActive;
         } else {
-            // 2. Not a faculty? Check if it's a Guest!
             const guest = await Guest.findOne({ voucherCode: voucherCode });
             if (!guest) return res.status(404).json({ error: "Invalid voucher code" });
             
-            // If it's a guest, we bill it to the Faculty who invited them!
             targetFacultyId = guest.facultyId;
             targetDepartmentId = guest.departmentId;
+            validFrom = new Date(guest.validFrom);
+            validTill = new Date(guest.validTill);
+            isActive = guest.isActive;
         }
 
-        // 3. Create the order with the EXACT ObjectIds
+        validTill.setHours(23, 59, 59, 999);
+        const now = new Date();
+
+        if (!isActive || now < validFrom || now > validTill) {
+            return res.status(400).json({ error: "Access Denied: Your voucher is expired or inactive." });
+        }
+
+        // ==========================================
+        // CREATE ORDER IF ALL CHECKS PASS
+        // ==========================================
         const newOrder = new Order({
             facultyId: targetFacultyId,
             departmentId: targetDepartmentId,
-            items: items,
+            voucherCode: voucherCode, 
+            items: items, // Now includes the category from the frontend
             totalAmount: totalAmount
         });
 
@@ -44,13 +91,12 @@ router.post('/place', async (req, res) => {
     }
 });
 
-// === NEW: Fetch orders for a specific department's report ===
+// Fetch orders for a specific department's report 
 router.get('/department/:deptId', async (req, res) => {
     try {
-        // Fetch orders and populate the faculty details to get their names
         const orders = await Order.find({ departmentId: req.params.deptId })
             .populate('facultyId', 'fullName voucherCode')
-            .sort({ orderDate: -1 }); // Newest orders first
+            .sort({ orderDate: -1 }); 
             
         res.status(200).json(orders);
     } catch (error) {
@@ -58,12 +104,12 @@ router.get('/department/:deptId', async (req, res) => {
     }
 });
 
-// GET ALL Orders (For Canteen Manager / Admin)\
+// GET ALL Orders (For Canteen Manager / Admin)
 router.get('/all', async (req, res) => {
     try {
         const orders = await Order.find()
-            .populate('facultyId', 'fullName voucherCode') // Safely grab faculty details
-            .populate('departmentId', 'Name')          // Safely grab department details
+            .populate('facultyId', 'fullName voucherCode') 
+            .populate('departmentId', 'name') // Note: Using 'name' for department as fixed earlier
             .sort({ createdAt: -1 }); 
             
         res.status(200).json(orders);

@@ -3,9 +3,9 @@ import { useNavigate } from 'react-router-dom';
 import API from '../api/axios';
 import { Download, Printer, Plus, Edit, Trash2, LogOut, Utensils } from 'lucide-react';
 import jsPDF from 'jspdf';
-import 'jspdf-autotable';
+import autoTable from 'jspdf-autotable';
 
-// Helper function to get strict LOCAL time (Prevents the UTC timezone bug!)
+// Helper function to get strict LOCAL time
 const getLocalYYYYMMDD = (dateObj = new Date()) => {
   const year = dateObj.getFullYear();
   const month = String(dateObj.getMonth() + 1).padStart(2, '0');
@@ -23,7 +23,6 @@ const CanteenManagerDashboard = () => {
   
   const [filterDept, setFilterDept] = useState('All Departments');
   
-  // Use local time for the default date fields
   const todayStr = getLocalYYYYMMDD();
   const [startDate, setStartDate] = useState(todayStr);
   const [endDate, setEndDate] = useState(todayStr);
@@ -64,7 +63,6 @@ const CanteenManagerDashboard = () => {
 
   // --- STRICT LOCAL TIME FILTER LOGIC ---
   const filteredOrders = orders.filter(order => {
-      // 1. Date Check (Using Local Time Fix)
       if (order.createdAt || order.orderDate) {
           const rawDate = new Date(order.createdAt || order.orderDate);
           const localOrderDate = getLocalYYYYMMDD(rawDate);
@@ -73,7 +71,6 @@ const CanteenManagerDashboard = () => {
           if (endDate && localOrderDate > endDate) return false;
       }
 
-      // 2. Department Check
       if (filterDept !== 'All Departments') {
           const deptName = order.departmentId?.name || "Unknown";
           if (deptName !== filterDept) return false;
@@ -111,24 +108,155 @@ const CanteenManagerDashboard = () => {
       }
   };
 
+  // ==============================================================
+  // OFFICIAL PDF REPORT GENERATION (Based on CE_Report format)
+  // ==============================================================
   const downloadReport = () => {
       const doc = new jsPDF();
-      doc.setFontSize(16);
-      doc.text("Canteen Revenue Report", 14, 20);
-      doc.setFontSize(10);
-      doc.text(`Period: ${startDate} to ${endDate} | Dept: ${filterDept}`, 14, 28);
+      const img = new Image();
+      img.src = '/image1.jpeg'; 
       
-      const tableData = filteredOrders.map(o => [
-          o.facultyId?.fullName || 'Unknown Faculty',
-          o.departmentId?.name || 'Unknown Dept',
-          o.items?.map(i => `${i.itemName}(x${i.quantity})`).join(', ') || 'No Items',
-          `Rs.${o.totalAmount || 0}`
-      ]);
+      img.onload = () => {
+        // 1. Watermark
+        doc.setGState(new doc.GState({ opacity: 0.1 }));
+        doc.addImage(img, 'JPEG', 35, 70, 140, 140);
+        doc.setGState(new doc.GState({ opacity: 1.0 })); 
 
-      doc.autoTable({ startY: 35, head: [['Billed To', 'Department', 'Items', 'Amount']], body: tableData });
-      const totalSpent = filteredOrders.reduce((sum, o) => sum + (o.totalAmount || 0), 0);
-      doc.text(`Total Revenue: Rs. ${totalSpent}`, 14, doc.lastAutoTable.finalY + 10);
-      doc.save(`Canteen_Report_${startDate}_to_${endDate}.pdf`);
+        // 2. Header
+        doc.addImage(img, 'JPEG', 14, 10, 22, 22);
+        doc.setFontSize(16);
+        doc.setFont("helvetica", "bold");
+        doc.text("SCTR'S PUNE INSTITUTE OF COMPUTER TECHNOLOGY", 42, 18);
+        doc.setFontSize(11);
+        doc.setFont("helvetica", "normal");
+        doc.text("Office of the Mess & Canteen Section", 42, 24);
+
+        // 3. Title Box
+        doc.rect(55, 30, 100, 8);
+        doc.setFontSize(12);
+        doc.setFont("helvetica", "bold");
+        doc.text("DEPARTMENT-WISE BILLING REPORT", 62, 36);
+
+        // 4. Metadata
+        doc.setFontSize(10);
+        doc.setFont("helvetica", "normal");
+        
+        // Generate a random Reference Number based on Date
+        const dateStr = new Date().toISOString().split('T')[0].replace(/-/g, '');
+        const refNo = `Ref No: PICT/CNTN/${dateStr}/${Math.floor(100 + Math.random() * 900)}`;
+        const dateRangeText = `Date: ${startDate ? new Date(startDate).toLocaleDateString('en-GB') : 'All'} to ${endDate ? new Date(endDate).toLocaleDateString('en-GB') : new Date().toLocaleDateString('en-GB')}`;
+        
+        doc.text(refNo, 14, 50);
+        doc.text(dateRangeText, 140, 50);
+        doc.setFont("helvetica", "bold");
+        doc.text(`Department: ${filterDept}`, 14, 58);
+
+        // ================= AGGREGATION LOGIC =================
+        // Separate Faculty vs Guest Orders based on Voucher prefix
+        const facultyOrders = filteredOrders.filter(o => !o.voucherCode?.startsWith('G-'));
+        const guestOrders = filteredOrders.filter(o => o.voucherCode?.startsWith('G-'));
+
+        // Aggregate Faculty
+        const facultyTotals = {};
+        facultyOrders.forEach(order => {
+            const name = order.facultyId?.fullName || 'Unknown Faculty';
+            if (!facultyTotals[name]) facultyTotals[name] = { items: [], total: 0 };
+            facultyTotals[name].total += order.totalAmount;
+            facultyTotals[name].items.push(order.items.map(i => `${i.itemName}(x${i.quantity})`).join(', '));
+        });
+
+        // Aggregate Guests
+        const guestTotals = {};
+        guestOrders.forEach(order => {
+            const name = `Guest Pass: ${order.voucherCode}\n(Host: ${order.facultyId?.fullName || 'Unknown'})`;
+            if (!guestTotals[name]) guestTotals[name] = { items: [], total: 0 };
+            guestTotals[name].total += order.totalAmount;
+            guestTotals[name].items.push(order.items.map(i => `${i.itemName}(x${i.quantity})`).join(', '));
+        });
+
+        let currentY = 70;
+
+        // ================= SECTION A: FACULTY =================
+        doc.setFontSize(11);
+        doc.setFont("helvetica", "bold");
+        doc.text("SECTION A: FACULTY CONSUMPTION", 14, currentY);
+        
+        const facultyTableData = Object.keys(facultyTotals).map((name, index) => [
+            index + 1, name, facultyTotals[name].items.join(' | '), `Rs. ${facultyTotals[name].total}`
+        ]);
+        const facultySum = Object.values(facultyTotals).reduce((sum, val) => sum + val.total, 0);
+
+        autoTable(doc, {
+          startY: currentY + 3,
+          head: [['Sr', 'Faculty Name', 'Items Consumed', 'Total (Rs)']],
+          body: facultyTableData.length ? facultyTableData : [['-', 'No Faculty Orders', '-', '-']],
+          theme: 'grid',
+          headStyles: { fillColor: [50, 50, 50] },
+          styles: { fontSize: 9, cellPadding: 3 },
+          columnStyles: { 0: { halign: 'center', cellWidth: 10 }, 3: { halign: 'right', cellWidth: 30 } }
+        });
+
+        currentY = doc.lastAutoTable.finalY;
+        doc.setFont("helvetica", "bold");
+        doc.text(`Sub-Total (Faculty): Rs. ${facultySum}/-`, 140, currentY + 8);
+
+        // ================= SECTION B: GUEST =================
+        currentY += 18;
+        doc.text("SECTION B: GUEST/EXTERNAL CONSUMPTION", 14, currentY);
+        
+        const guestTableData = Object.keys(guestTotals).map((name, index) => [
+            index + 1, name, guestTotals[name].items.join(' | '), `Rs. ${guestTotals[name].total}`
+        ]);
+        const guestSum = Object.values(guestTotals).reduce((sum, val) => sum + val.total, 0);
+
+        autoTable(doc, {
+          startY: currentY + 3,
+          head: [['Sr', 'Guest Details', 'Items Consumed', 'Total (Rs)']],
+          body: guestTableData.length ? guestTableData : [['-', 'No Guest Orders', '-', '-']],
+          theme: 'grid',
+          headStyles: { fillColor: [50, 50, 50] },
+          styles: { fontSize: 9, cellPadding: 3 },
+          columnStyles: { 0: { halign: 'center', cellWidth: 10 }, 3: { halign: 'right', cellWidth: 30 } }
+        });
+
+        currentY = doc.lastAutoTable.finalY;
+        doc.setFont("helvetica", "bold");
+        doc.text(`Sub-Total (Guest): Rs. ${guestSum}/-`, 140, currentY + 8);
+
+        // ================= GRAND TOTAL =================
+        const grandTotal = facultySum + guestSum;
+        doc.rect(130, currentY + 15, 66, 10);
+        doc.setFontSize(12);
+        doc.text(`GRAND TOTAL`, 135, currentY + 22);
+        doc.text(`Rs. ${grandTotal}`, 175, currentY + 22);
+
+        // ================= SIGNATURES & FOOTER =================
+        const pageHeight = doc.internal.pageSize.getHeight();
+        doc.setFontSize(10);
+        doc.setFont("helvetica", "bold");
+        
+        // Manager Signature
+        doc.text("MESS MANAGER", 25, pageHeight - 35);
+        doc.setFont("helvetica", "normal");
+        doc.text("Sign & Seal", 28, pageHeight - 30);
+        
+        // HOD Signature
+        doc.setFont("helvetica", "bold");
+        doc.text("HEAD OF DEPARTMENT", 145, pageHeight - 35);
+        doc.setFont("helvetica", "normal");
+        doc.text(`Dept. of ${filterDept !== 'All Departments' ? filterDept : 'All'}`, 150, pageHeight - 30);
+
+        // System Footer
+        doc.setFontSize(7);
+        doc.text("THIS IS A SYSTEM-GENERATED STATEMENT FOR INTERNAL ACCOUNTING AND AUDIT PURPOSES.", 14, pageHeight - 15);
+        doc.text(`GENERATED ON: ${new Date().toLocaleString('en-GB')}`, 14, pageHeight - 10);
+
+        doc.save(`Canteen_Report_${filterDept.replace(/\s+/g, '_')}_${startDate}.pdf`);
+      };
+
+      img.onerror = () => {
+          alert("Failed to load watermark image. Check if image1.jpeg exists in the public folder.");
+      };
   };
 
   const printReceipt = (order) => {
@@ -208,7 +336,7 @@ const CanteenManagerDashboard = () => {
                           <table className="w-full text-left border-collapse">
                               <thead className="bg-slate-50 border-b border-slate-200 text-[11px] font-bold text-slate-500 uppercase tracking-wider">
                                   <tr>
-                                      <th className="py-4 px-5">Billed To (Faculty)</th>
+                                      <th className="py-4 px-5">Billed To (Faculty/Guest)</th>
                                       <th className="py-4 px-5">Department</th>
                                       <th className="py-4 px-5">Date</th>
                                       <th className="py-4 px-5">Items Ordered</th>
@@ -222,10 +350,16 @@ const CanteenManagerDashboard = () => {
                                   ) : (
                                       filteredOrders.map(order => {
                                           const orderDateDisplay = order.createdAt || order.orderDate ? new Date(order.createdAt || order.orderDate).toLocaleDateString('en-GB') : 'No Date';
+                                          const isGuest = order.voucherCode?.startsWith('G-');
                                           
                                           return (
                                               <tr key={order._id} className="hover:bg-blue-50/30 transition-colors">
-                                                  <td className="py-4 px-5 font-bold text-slate-700">{order.facultyId?.fullName || 'Unknown Faculty'}</td>
+                                                  <td className="py-4 px-5">
+                                                      <p className="font-bold text-slate-700">
+                                                          {isGuest ? `Guest (${order.voucherCode})` : (order.facultyId?.fullName || 'Unknown Faculty')}
+                                                      </p>
+                                                      {isGuest && <p className="text-[10px] text-slate-400 font-medium mt-0.5">Host: {order.facultyId?.fullName}</p>}
+                                                  </td>
                                                   <td className="py-4 px-5">
                                                       <span className="bg-slate-100 text-slate-600 font-bold px-2.5 py-1 rounded text-[10px] uppercase tracking-wider border border-slate-200">
                                                           {order.departmentId?.name || 'Unknown'}

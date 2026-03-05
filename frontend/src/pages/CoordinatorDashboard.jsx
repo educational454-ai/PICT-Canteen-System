@@ -8,13 +8,15 @@ import API from '../api/axios';
 
 const CoordinatorDashboard = () => {
   const navigate = useNavigate();
-  const [activeTab, setActiveTab] = useState(() => localStorage.getItem('activeCoordinatorTab') || 'faculty');
+  const [activeTab, setActiveTab] = useState(() => sessionStorage.getItem('activeCoordinatorTab') || 'faculty');
   const [faculty, setFaculty] = useState([]);
   const [guests, setGuests] = useState([]); 
   const [orders, setOrders] = useState([]); 
   const [searchTerm, setSearchTerm] = useState('');
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isGuestModalOpen, setIsGuestModalOpen] = useState(false);
+  
+  // This state now controls BOTH the Excel upload override AND the table filter
   const [yearScope, setYearScope] = useState('');
   
   const [startDate, setStartDate] = useState('');
@@ -22,8 +24,8 @@ const CoordinatorDashboard = () => {
   
   const fileInputRef = useRef(null);
 
-  const deptId = localStorage.getItem('deptId');
-  const deptCode = localStorage.getItem('deptCode');
+  const deptId = sessionStorage.getItem('deptId');
+  const deptCode = sessionStorage.getItem('deptCode');
 
   const [formData, setFormData] = useState({ 
       fullName: '', email: '', mobile: '', academicYear: '2025-26',
@@ -38,7 +40,7 @@ const CoordinatorDashboard = () => {
   });
 
   useEffect(() => {
-    localStorage.setItem('activeCoordinatorTab', activeTab);
+    sessionStorage.setItem('activeCoordinatorTab', activeTab);
   }, [activeTab]);
 
   useEffect(() => { 
@@ -101,7 +103,6 @@ const CoordinatorDashboard = () => {
   };
 
   const handleExportReportsCSV = () => {
-    // FIXED: Now uses filteredOrders so the Excel file matches the on-screen filters!
     const exportData = filteredOrders.map(o => ({
       "Date": new Date(o.orderDate || o.createdAt).toLocaleDateString(),
       "Time": new Date(o.orderDate || o.createdAt).toLocaleTimeString(),
@@ -237,8 +238,6 @@ const CoordinatorDashboard = () => {
 
   const handleAddSingle = async (e) => {
     e.preventDefault();
-    
-    // STRICT SAFETY NET: Prevent adding if session was dropped!
     if (!deptId || !deptCode) {
         alert("Authentication Error: Department ID is missing. Please log out and log back in.");
         return;
@@ -281,6 +280,8 @@ const CoordinatorDashboard = () => {
         const fromDate = new Date(row['From Date'] || new Date());
         const tillDate = new Date(row['End Date'] || new Date());
         const extractedYear = row['Pattern Name']?.includes('(') ? row['Pattern Name'].split('(')[1].substring(0, 4) : "2025-26";
+        
+        // IMPORTANT: Uses the dropdown filter variable (yearScope) if selected, otherwise defaults to Excel data
         const finalYearScope = yearScope !== '' ? yearScope : extractedYear;
 
         if (facultyMap.has(mobile)) {
@@ -308,7 +309,18 @@ const CoordinatorDashboard = () => {
     reader.readAsBinaryString(file);
   };
 
-  const filteredFaculty = faculty.filter(f => f.fullName.toLowerCase().includes(searchTerm.toLowerCase()) || f.voucherCode.toLowerCase().includes(searchTerm.toLowerCase()));
+  // --- NEW: STRICT DUAL FILTER LOGIC ---
+  const filteredFaculty = faculty.filter(f => {
+      // 1. Search Filter (Checks Name, Code, and Email)
+      const matchesSearch = f.fullName.toLowerCase().includes(searchTerm.toLowerCase()) || 
+                            f.voucherCode.toLowerCase().includes(searchTerm.toLowerCase()) ||
+                            (f.email && f.email.toLowerCase().includes(searchTerm.toLowerCase()));
+      
+      // 2. Year Scope Filter (Matches exactly to dropdown, ignores if dropdown is empty)
+      const matchesYear = yearScope === '' || f.academicYear === yearScope;
+
+      return matchesSearch && matchesYear;
+  });
 
 return (
     <div className="flex min-h-screen bg-[#f8f9fc] relative font-sans h-screen overflow-hidden">
@@ -331,7 +343,7 @@ return (
             <BarChart3 size={20} /> Reports & Logs
           </button>
         </nav>
-        <button onClick={() => { localStorage.clear(); navigate('/'); }} className="p-6 text-gray-400 hover:text-white flex items-center gap-3 border-t border-white/10 transition-colors">
+        <button onClick={() => { sessionStorage.clear(); navigate('/'); }} className="p-6 text-gray-400 hover:text-white flex items-center gap-3 border-t border-white/10 transition-colors">
           <LogOut size={20} /> Logout
         </button>
       </div>
@@ -365,10 +377,12 @@ return (
                 </div>
                 <div className="flex gap-3">
                   <select className="px-4 py-2.5 border-2 border-gray-100 rounded-xl text-gray-600 text-sm font-bold outline-none focus:border-blue-500 hover:bg-gray-50 bg-white" value={yearScope} onChange={(e) => setYearScope(e.target.value)}>
-                    <option value="">Extract Year from Excel</option>
+                    <option value="">All Years (Extract on Upload)</option>
                     <option value="2nd Yr (Regular)">2nd Yr (Regular)</option>
                     <option value="2nd Yr (Backlog)">2nd Yr (Backlog)</option>
                     <option value="3rd Yr (Regular)">3rd Yr (Regular)</option>
+                    <option value="3rd Yr (Backlog)">3rd Yr (Backlog)</option>
+                    <option value="4th Yr (Regular)">4th Yr (Regular)</option>
                   </select>
                   <input type="file" ref={fileInputRef} className="hidden" accept=".xlsx, .xls" onChange={handleFileUpload} />
                   <button onClick={() => fileInputRef.current.click()} className="px-4 py-2.5 border-2 border-yellow-100 rounded-xl text-sm font-bold flex items-center gap-2 text-yellow-700 bg-yellow-50 hover:bg-yellow-100 transition-all"><FileSpreadsheet size={16} /> Upload File</button>
@@ -513,6 +527,22 @@ return (
               <input required type="text" placeholder="Full Name" value={formData.fullName} onChange={(e) => setFormData({...formData, fullName: e.target.value})} className="w-full p-3 border rounded-lg focus:ring-2 outline-none focus:border-blue-500" />
               <input required type="email" placeholder="Email Address" value={formData.email} onChange={(e) => setFormData({...formData, email: e.target.value})} className="w-full p-3 border rounded-lg focus:ring-2 outline-none focus:border-blue-500" />
               <input required type="text" placeholder="Mobile Number" value={formData.mobile} onChange={(e) => setFormData({...formData, mobile: e.target.value})} className="w-full p-3 border rounded-lg focus:ring-2 outline-none focus:border-blue-500" />
+              <div>
+                <label className="block text-[11px] font-bold text-gray-400 uppercase tracking-wide mb-1">Year Scope</label>
+                <select 
+                  required 
+                  value={formData.academicYear} 
+                  onChange={(e) => setFormData({...formData, academicYear: e.target.value})} 
+                  className="w-full p-3 border rounded-lg focus:ring-2 outline-none focus:border-blue-500 text-sm text-gray-700 bg-white"
+                >
+                  <option value="2025-26">2025-26 (Default)</option>
+                  <option value="2nd Yr (Regular)">2nd Yr (Regular)</option>
+                  <option value="2nd Yr (Backlog)">2nd Yr (Backlog)</option>
+                  <option value="3rd Yr (Regular)">3rd Yr (Regular)</option>
+                  <option value="3rd Yr (Backlog)">3rd Yr (Backlog)</option>
+                  <option value="4th Yr (Regular)">4th Yr (Regular)</option>
+                </select>
+              </div>
               <div className="flex gap-4">
                 <div className="flex-1"><label className="block text-[11px] font-bold text-gray-400 uppercase tracking-wide mb-1">Valid From</label><input required type="date" value={formData.validFrom} onChange={(e) => setFormData({...formData, validFrom: e.target.value})} className="w-full p-3 border rounded-lg focus:ring-2 outline-none focus:border-blue-500 text-sm text-gray-700" /></div>
                 <div className="flex-1"><label className="block text-[11px] font-bold text-gray-400 uppercase tracking-wide mb-1">Valid Till</label><input required type="date" value={formData.validTill} onChange={(e) => setFormData({...formData, validTill: e.target.value})} className="w-full p-3 border rounded-lg focus:ring-2 outline-none focus:border-blue-500 text-sm text-gray-700" /></div>

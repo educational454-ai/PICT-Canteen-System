@@ -6,7 +6,14 @@ import { Utensils, LogOut, Trash2, CheckCircle, Ticket, X, UtensilsCrossed, Plus
 const MenuPage = () => {
   const navigate = useNavigate();
   
-  const [activeTab, setActiveTab] = useState('menu'); 
+  // Initialize the tab from memory, default to 'menu'
+  const [activeTab, setActiveTab] = useState(() => {
+      return sessionStorage.getItem('activeMenuTab') || 'menu';
+  });
+  // Automatically save the tab to memory whenever it changes
+  useEffect(() => {
+      sessionStorage.setItem('activeMenuTab', activeTab);
+  }, [activeTab]);
   const [menuItems, setMenuItems] = useState([]); 
   const [myGuests, setMyGuests] = useState([]); 
   
@@ -92,8 +99,13 @@ const MenuPage = () => {
     try {
       const orderData = {
         voucherCode: voucher,
-        // Backend always gets exactly 1 quantity per selected item
-        items: selectedItemsList.map(item => ({ itemName: item.itemName, quantity: 1, price: item.price })),
+        //  We are now sending item.category to the backend!
+        items: selectedItemsList.map(item => ({ 
+            itemName: item.itemName, 
+            category: item.category || 'Other', 
+            quantity: 1, 
+            price: item.price 
+        })),
         totalAmount: totalAmount
       };
       await API.post('/orders/place', orderData);
