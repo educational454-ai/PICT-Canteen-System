@@ -109,7 +109,7 @@ const CanteenManagerDashboard = () => {
   };
 
   // ==============================================================
-  // OFFICIAL PDF REPORT GENERATION (Based on CE_Report format)
+  // OFFICIAL PDF REPORT GENERATION 
   // ==============================================================
   const downloadReport = () => {
       const doc = new jsPDF();
@@ -117,8 +117,8 @@ const CanteenManagerDashboard = () => {
       img.src = '/image1.jpeg'; 
       
       img.onload = () => {
-        // 1. Watermark
-        doc.setGState(new doc.GState({ opacity: 0.1 }));
+        // 1. Watermark (Visible through transparent tables)
+        doc.setGState(new doc.GState({ opacity: 0.15 }));
         doc.addImage(img, 'JPEG', 35, 70, 140, 140);
         doc.setGState(new doc.GState({ opacity: 1.0 })); 
 
@@ -141,18 +141,17 @@ const CanteenManagerDashboard = () => {
         doc.setFontSize(10);
         doc.setFont("helvetica", "normal");
         
-        // Generate a random Reference Number based on Date
-        const dateStr = new Date().toISOString().split('T')[0].replace(/-/g, '');
-        const refNo = `Ref No: PICT/CNTN/${dateStr}/${Math.floor(100 + Math.random() * 900)}`;
+        // Generate dynamic Ref No format
+        const deptCodeName = filterDept !== 'All Departments' ? filterDept.substring(0, 4).toUpperCase() : 'ALL';
+        const refNo = `Ref No: PICT/CNTN/${new Date().getFullYear()}/${deptCodeName}-01`;
         const dateRangeText = `Date: ${startDate ? new Date(startDate).toLocaleDateString('en-GB') : 'All'} to ${endDate ? new Date(endDate).toLocaleDateString('en-GB') : new Date().toLocaleDateString('en-GB')}`;
         
         doc.text(refNo, 14, 50);
         doc.text(dateRangeText, 140, 50);
         doc.setFont("helvetica", "bold");
-        doc.text(`Department: ${filterDept}`, 14, 58);
+        doc.text(`Department: ${filterDept.toUpperCase()} DEPARTMENT`, 14, 58);
 
         // ================= AGGREGATION LOGIC =================
-        // Separate Faculty vs Guest Orders based on Voucher prefix
         const facultyOrders = filteredOrders.filter(o => !o.voucherCode?.startsWith('G-'));
         const guestOrders = filteredOrders.filter(o => o.voucherCode?.startsWith('G-'));
 
@@ -192,6 +191,8 @@ const CanteenManagerDashboard = () => {
           body: facultyTableData.length ? facultyTableData : [['-', 'No Faculty Orders', '-', '-']],
           theme: 'grid',
           headStyles: { fillColor: [50, 50, 50] },
+          bodyStyles: { fillColor: false }, // Ensures watermark is visible
+          alternateRowStyles: { fillColor: false },
           styles: { fontSize: 9, cellPadding: 3 },
           columnStyles: { 0: { halign: 'center', cellWidth: 10 }, 3: { halign: 'right', cellWidth: 30 } }
         });
@@ -215,6 +216,8 @@ const CanteenManagerDashboard = () => {
           body: guestTableData.length ? guestTableData : [['-', 'No Guest Orders', '-', '-']],
           theme: 'grid',
           headStyles: { fillColor: [50, 50, 50] },
+          bodyStyles: { fillColor: false },
+          alternateRowStyles: { fillColor: false },
           styles: { fontSize: 9, cellPadding: 3 },
           columnStyles: { 0: { halign: 'center', cellWidth: 10 }, 3: { halign: 'right', cellWidth: 30 } }
         });
@@ -230,26 +233,32 @@ const CanteenManagerDashboard = () => {
         doc.text(`GRAND TOTAL`, 135, currentY + 22);
         doc.text(`Rs. ${grandTotal}`, 175, currentY + 22);
 
-        // ================= SIGNATURES & FOOTER =================
+        // ================= SIGNATURES & FOOTER (5-Signature Format) =================
         const pageHeight = doc.internal.pageSize.getHeight();
-        doc.setFontSize(10);
+        doc.setFontSize(9);
         doc.setFont("helvetica", "bold");
         
-        // Manager Signature
-        doc.text("MESS MANAGER", 25, pageHeight - 35);
-        doc.setFont("helvetica", "normal");
-        doc.text("Sign & Seal", 28, pageHeight - 30);
+        // Line 1
+        doc.line(20, pageHeight - 45, 60, pageHeight - 45);
+        doc.text("MESS MANAGER", 25, pageHeight - 39);
         
-        // HOD Signature
-        doc.setFont("helvetica", "bold");
-        doc.text("HEAD OF DEPARTMENT", 145, pageHeight - 35);
-        doc.setFont("helvetica", "normal");
-        doc.text(`Dept. of ${filterDept !== 'All Departments' ? filterDept : 'All'}`, 150, pageHeight - 30);
+        doc.line(85, pageHeight - 45, 135, pageHeight - 45);
+        doc.text("PRACTICAL COORDINATOR", 87, pageHeight - 39);
+        
+        doc.line(160, pageHeight - 45, 200, pageHeight - 45);
+        doc.text("HEAD OF DEPARTMENT", 162, pageHeight - 39);
+        
+        // Line 2
+        doc.line(45, pageHeight - 20, 85, pageHeight - 20);
+        doc.text("CEO", 60, pageHeight - 14);
+        
+        doc.line(135, pageHeight - 20, 175, pageHeight - 20);
+        doc.text("PRINCIPAL", 148, pageHeight - 14);
 
         // System Footer
+        doc.setFont("helvetica", "normal");
         doc.setFontSize(7);
-        doc.text("THIS IS A SYSTEM-GENERATED STATEMENT FOR INTERNAL ACCOUNTING AND AUDIT PURPOSES.", 14, pageHeight - 15);
-        doc.text(`GENERATED ON: ${new Date().toLocaleString('en-GB')}`, 14, pageHeight - 10);
+        doc.text("SYSTEM GENERATED REPORT | PICT CANTEEN & MESS SECTION", 65, pageHeight - 5);
 
         doc.save(`Canteen_Report_${filterDept.replace(/\s+/g, '_')}_${startDate}.pdf`);
       };
