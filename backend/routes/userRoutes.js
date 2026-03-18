@@ -1,6 +1,9 @@
 const express = require('express');
 const router = express.Router();
 const User = require('../models/User'); 
+const Faculty = require('../models/Faculty');
+const Guest = require('../models/Guest');
+const Order = require('../models/Order');
 
 // Route: Create a new user
 router.post('/register', async (req, res) => {
@@ -57,6 +60,34 @@ router.post('/login', async (req, res) => {
     } catch (error) {
         console.error("Server error during login:", error);
         res.status(500).json({ error: "Login failed" });
+    }
+});
+
+// 🚨 DANGER ZONE: College-Wide Reset Route
+router.post('/global-reset', async (req, res) => {
+    try {
+        const { password } = req.body;
+        
+        // 1. Find the Super Admin in the database
+        const adminUser = await User.findOne({ role: 'SUPER_ADMIN' });
+
+        // 2. Verify the password matches EXACTLY
+        if (!adminUser || adminUser.password !== password) {
+            console.log("Failed Reset Attempt: Incorrect Password");
+            return res.status(401).json({ error: "Authentication failed. Incorrect password." });
+        }
+
+        // 3. If password matches, WIPE THE COLLECTIONS
+        console.log("🚨 INITIATING GLOBAL DATABASE WIPE 🚨");
+        await Faculty.deleteMany({});
+        await Guest.deleteMany({});
+        await Order.deleteMany({});
+        console.log("✅ WIPE COMPLETE");
+
+        res.status(200).json({ message: "System Reset Successful." });
+    } catch (error) {
+        console.error("Reset Error:", error);
+        res.status(500).json({ error: "Failed to execute reset protocol." });
     }
 });
 

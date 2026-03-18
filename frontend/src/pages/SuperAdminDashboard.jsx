@@ -173,13 +173,17 @@ const SuperAdminDashboard = () => {
       setIsResetting(true);
 
       try {
-          // Future backend connection: await API.post('/admin/global-reset', { password: adminPassword });
-          await new Promise(resolve => setTimeout(resolve, 1500));
+          // 🚀 REAL BACKEND CONNECTION: Verifies password & wipes data!
+          await API.post('/users/global-reset', { password: adminPassword });
           
           alert("System Reset Protocol Successfully Executed. All college data has been archived and cleared.");
           setIsResetModalOpen(false);
           setAdminPassword('');
+          
+          // Refresh the dashboard to show 0 for everything!
+          fetchAllData(); 
       } catch (err) {
+          // If the backend sends back a 401 Unauthorized, display the error in the red box
           setResetError(err.response?.data?.error || "Authentication failed. Incorrect password.");
       } finally {
           setIsResetting(false);
