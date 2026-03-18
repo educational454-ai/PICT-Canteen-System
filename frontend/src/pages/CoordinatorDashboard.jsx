@@ -181,23 +181,18 @@ const CoordinatorDashboard = () => {
       });
 
       const guestTotals = {};
-      guestOrders.forEach(order => {
-          const rawDate = new Date(order.createdAt || order.orderDate).toLocaleDateString('en-GB');
-          const baseName = `Guest Pass: ${order.voucherCode}\n(Host: ${order.facultyId?.fullName || 'Unknown'})`;
-          
-          const groupingKey = `${baseName}_${rawDate}`;
-
-          if (!guestTotals[groupingKey]) {
-              guestTotals[groupingKey] = { 
-                  displayName: baseName, 
-                  date: rawDate, 
-                  items: [], 
-                  total: 0 
-              };
-          }
-          guestTotals[groupingKey].total += order.totalAmount;
-          guestTotals[groupingKey].items.push(order.items.map(i => `${i.itemName}(x${i.quantity})`).join(', '));
-      });
+        guestOrders.forEach(order => {
+            const rawDate = new Date(order.createdAt || order.orderDate).toLocaleDateString('en-GB');
+            
+            // 🚀 THE FIX: Use the actual guest name we added in the backend!
+            const actualGuestName = order.guestName || 'Guest';
+            const baseName = `${actualGuestName} (${order.voucherCode})\n(Host: ${order.facultyId?.fullName || 'Unknown'})`;
+            
+            const groupingKey = `${baseName}_${rawDate}`;
+            if (!guestTotals[groupingKey]) guestTotals[groupingKey] = { displayName: baseName, date: rawDate, items: [], total: 0 };
+            guestTotals[groupingKey].total += order.totalAmount;
+            guestTotals[groupingKey].items.push(order.items.map(i => `${i.itemName}(x${i.quantity})`).join(', '));
+        });
 
       let currentY = 70;
 

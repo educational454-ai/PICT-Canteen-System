@@ -4,6 +4,7 @@ import MenuPage from './pages/MenuPage';
 import CoordinatorDashboard from './pages/CoordinatorDashboard';
 import CanteenManagerDashboard from './pages/CanteenManagerDashboard';
 import SuperAdminDashboard from './pages/SuperAdminDashboard';
+import ProtectedRoute from './components/ProtectedRoute'; 
 
 // 1. Import your Footer component
 import Footer from './components/Footer';
@@ -16,11 +17,39 @@ function App() {
       {/* 3. The main content (Routes) gets "flex-grow" to push the footer down */}
       <div className="flex-grow">
         <Routes>
+          {/* Public / Semi-Public Routes */}
           <Route path="/" element={<LoginPage />} />
           <Route path="/menu" element={<MenuPage />} />
-          <Route path="/coordinator" element={<CoordinatorDashboard />} />
-          <Route path="/manager" element={<CanteenManagerDashboard />} />
-          <Route path="/admin" element={<SuperAdminDashboard />} />
+          
+          {/* 🔒 PROTECTED ROUTE: Only COORDINATOR allowed */}
+          <Route 
+            path="/coordinator" 
+            element={
+              <ProtectedRoute allowedRoles={['COORDINATOR']}>
+                <CoordinatorDashboard />
+              </ProtectedRoute>
+            } 
+          />
+          
+          {/* 🔒 PROTECTED ROUTE: Only MANAGER allowed */}
+          <Route 
+            path="/manager" 
+            element={
+              <ProtectedRoute allowedRoles={['MANAGER']}>
+                <CanteenManagerDashboard />
+              </ProtectedRoute>
+            } 
+          />
+          
+          {/* 🔒 PROTECTED ROUTE: Only SUPER_ADMIN allowed */}
+          <Route 
+            path="/admin" 
+            element={
+              <ProtectedRoute allowedRoles={['SUPER_ADMIN']}>
+                <SuperAdminDashboard />
+              </ProtectedRoute>
+            } 
+          />
         </Routes>
       </div>
 

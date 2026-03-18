@@ -107,15 +107,64 @@ router.get('/department/:deptId', async (req, res) => {
 // GET ALL Orders (For Canteen Manager / Admin)
 router.get('/all', async (req, res) => {
     try {
+        // 1. Fetch orders and use .lean() to make them editable plain JavaScript objects
         const orders = await Order.find()
             .populate('facultyId', 'fullName voucherCode') 
-            .populate('departmentId', 'name') // Note: Using 'name' for department as fixed earlier
-            .sort({ createdAt: -1 }); 
+            .populate('departmentId', 'name')
+            .sort({ createdAt: -1 })
+            .lean(); 
             
-        res.status(200).json(orders);
+        // 2. Fetch all guests so we can match their names
+        const guests = await Guest.find({}, 'voucherCode guestName').lean();
+        
+        // 3. Create a quick dictionary for fast lookups { 'G-1234': 'John Doe' }
+        const guestMap = {};
+        guests.forEach(g => {
+            guestMap[g.voucherCode] = g.guestName;
+        });
+
+        // 4. Attach the real guest name to the order!
+        const enrichedOrders = orders.map(order => {
+            if (order.voucherCode && order.voucherCode.startsWith('G-')) {
+                order.guestName = guestMap[order.voucherCode] || 'Unknown Guest';
+            }
+            return order;
+        });
+
+        res.status(200).json(enrichedOrders);
     } catch (error) {
         console.error("🚨 BACKEND CRASH in /orders/all:", error);
         res.status(500).json({ error: "Failed to fetch all orders", details: error.message });
+    }
+});
+
+// ==========================================
+// UPDATE ORDER STATUS (For Canteen Manager)
+// ==========================================
+router.put('/:id/status', async (req, res) => {
+    try {
+        const { status } = req.body;
+        
+        // Ensure the status is one of the allowed values
+        const validStatuses = ['Pending', 'Preparing', 'Ready', 'Completed'];
+        if (!validStatuses.includes(status)) {
+            return res.status(400).json({ error: "Invalid status value provided." });
+        }
+
+        const updatedOrder = await Order.findByIdAndUpdate(
+            req.params.id,
+            { status: status },
+            { new: true }
+        );
+
+        if (!updatedOrder) {
+            return res.status(404).json({ error: "Order not found." });
+        }
+
+        res.status(200).json({ message: "Order status updated successfully", order: updatedOrder });
+    } catch (error) {
+        console.error("Error updating order status:", error);
+        res.status(500).json({ error: "Failed to update order status" });
     }
 });
 

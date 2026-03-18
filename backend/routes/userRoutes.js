@@ -41,7 +41,7 @@ router.post('/login', async (req, res) => {
         }
 
         // 🚀 THE FIX 1: Allow SUPER_ADMIN to bypass the department check!
-        if (!user.departmentId && user.role !== 'SUPER_ADMIN') {
+        if (!user.departmentId && user.role !== 'SUPER_ADMIN' && user.role !== 'MANAGER') {
             console.log("Error: User exists, but departmentId is missing or invalid!");
             return res.status(500).json({ error: "User is not assigned to a valid department." });
         }

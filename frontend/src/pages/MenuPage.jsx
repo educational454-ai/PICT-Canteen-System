@@ -17,8 +17,7 @@ const MenuPage = () => {
   const [menuItems, setMenuItems] = useState([]); 
   const [myGuests, setMyGuests] = useState([]); 
   
-  // NEW: Store selections by category instead of an array
-  // Example: { "Beverages": { id: 1, name: "Tea", price: 10 }, "Snacks": {...} }
+  // Store selections by category instead of an array
   const [selections, setSelections] = useState({});
   const [loading, setLoading] = useState(false);
   const [orderSuccess, setOrderSuccess] = useState(false);
@@ -57,8 +56,11 @@ const MenuPage = () => {
       } catch (err) { console.error("Guest fetch error", err); }
   };
 
-  // --- NEW COMBO SELECTION LOGIC ---
+  // --- COMBO SELECTION LOGIC ---
   const toggleSelection = (item) => {
+    // 🚀 THE FIX 1: Don't allow clicking if out of stock!
+    if (item.isAvailable === false) return;
+
     const category = item.category || 'Other';
     setSelections((prev) => {
       const currentSelections = { ...prev };
@@ -99,7 +101,6 @@ const MenuPage = () => {
     try {
       const orderData = {
         voucherCode: voucher,
-        //  We are now sending item.category to the backend!
         items: selectedItemsList.map(item => ({ 
             itemName: item.itemName, 
             category: item.category || 'Other', 
@@ -190,19 +191,40 @@ const MenuPage = () => {
                             <h3 className="text-sm font-black text-slate-400 uppercase tracking-widest border-b border-slate-200 pb-2 mb-4">Select {category}</h3>
                             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                                 {items.map((item) => {
+                                    const isAvailable = item.isAvailable !== false; // 🚀 THE FIX 2: Check availability
                                     const isSelected = selections[category]?._id === item._id;
+
                                     return (
                                         <div 
                                             key={item._id} 
                                             onClick={() => toggleSelection(item)}
-                                            className={`p-3.5 rounded-xl border transition-all cursor-pointer flex justify-between items-center group ${isSelected ? 'bg-blue-50 border-blue-500 shadow-sm ring-1 ring-blue-500' : 'bg-white border-slate-200 hover:border-blue-300 hover:shadow-sm'}`}
+                                            className={`p-3.5 rounded-xl border transition-all flex justify-between items-center group ${
+                                                !isAvailable ? 'bg-slate-50 border-slate-200 opacity-60 cursor-not-allowed' :
+                                                isSelected ? 'bg-blue-50 border-blue-500 shadow-sm ring-1 ring-blue-500 cursor-pointer' : 
+                                                'bg-white border-slate-200 hover:border-blue-300 hover:shadow-sm cursor-pointer'
+                                            }`}
                                         >
                                             <div className="pr-3">
-                                                <h3 className={`font-semibold text-sm md:text-base leading-tight mt-0.5 ${isSelected ? 'text-blue-900' : 'text-slate-800'}`}>{item.itemName}</h3>
-                                                <p className={`font-bold text-base md:text-lg mt-0.5 ${isSelected ? 'text-blue-700' : 'text-slate-500'}`}>₹{item.price}</p>
+                                                <div className="flex items-center gap-2 mb-0.5">
+                                                    <h3 className={`font-semibold text-sm md:text-base leading-tight ${
+                                                        !isAvailable ? 'text-slate-500 line-through' :
+                                                        isSelected ? 'text-blue-900' : 'text-slate-800'
+                                                    }`}>{item.itemName}</h3>
+                                                    {/* 🚀 THE FIX 3: Add out of stock badge */}
+                                                    {!isAvailable && <span className="text-[9px] font-black text-red-500 bg-red-50 border border-red-100 px-1.5 py-0.5 rounded uppercase tracking-wider">Out of Stock</span>}
+                                                </div>
+                                                <p className={`font-bold text-base md:text-lg mt-0.5 ${
+                                                    !isAvailable ? 'text-slate-400' :
+                                                    isSelected ? 'text-blue-700' : 'text-slate-500'
+                                                }`}>₹{item.price}</p>
                                             </div>
-                                            <div className={`shrink-0 w-8 h-8 rounded-full flex items-center justify-center border transition-colors ${isSelected ? 'bg-blue-600 border-blue-600 text-white' : 'bg-slate-50 border-slate-200 text-slate-400 group-hover:border-blue-300 group-hover:text-blue-500'}`}>
-                                                {isSelected ? <Check size={16} /> : <Plus size={16} />}
+                                            <div className={`shrink-0 w-8 h-8 rounded-full flex items-center justify-center border transition-colors ${
+                                                !isAvailable ? 'bg-slate-100 border-slate-200 text-slate-300' :
+                                                isSelected ? 'bg-blue-600 border-blue-600 text-white' : 
+                                                'bg-slate-50 border-slate-200 text-slate-400 group-hover:border-blue-300 group-hover:text-blue-500'
+                                            }`}>
+                                                {/* 🚀 THE FIX 4: Change icon based on availability */}
+                                                {!isAvailable ? <X size={16} /> : isSelected ? <Check size={16} /> : <Plus size={16} />}
                                             </div>
                                         </div>
                                     )
@@ -256,10 +278,9 @@ const MenuPage = () => {
             </div>
           )}
 
-          {/* TAB 2: FACULTY GUEST MANAGEMENT (Kept identical to previous) */}
+          {/* TAB 2: FACULTY GUEST MANAGEMENT */}
           {activeTab === 'guests' && userRole === 'FACULTY' && (
              <div className="flex flex-col gap-4 w-full">
-                {/* ... (Kept the exact same Guest Management UI from previous step to save space) ... */}
                  <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 bg-white p-5 rounded-xl shadow-sm border border-slate-200">
                     <div>
                         <h2 className="text-lg font-bold text-slate-800">My Guest Passes</h2>
