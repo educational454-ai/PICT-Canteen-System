@@ -22,9 +22,6 @@ const CoordinatorDashboard = () => {
   
   const fileInputRef = useRef(null);
 
-  // ==========================================
-  // FETCHING LOGGED-IN USER DETAILS FROM MEMORY
-  // ==========================================
   const deptId = sessionStorage.getItem('deptId');
   const deptCode = sessionStorage.getItem('deptCode') || 'UNKNOWN';
   const userName = sessionStorage.getItem('userName') || 'Coordinator'; 
@@ -120,18 +117,19 @@ const CoordinatorDashboard = () => {
     XLSX.writeFile(workbook, `${deptCode}_Canteen_Usage_Report.xlsx`);
   };
 
+  // ==============================================================
+  // 🚀 UPGRADED: DATE-WISE GROUPING FOR PDF REPORT 🚀
+  // ==============================================================
   const generatePDFInvoice = () => {
     const doc = new jsPDF();
     const img = new Image();
     img.src = '/image1.jpeg'; 
     
     img.onload = () => {
-      // 1. Transparent Watermark
       doc.setGState(new doc.GState({ opacity: 0.15 }));
       doc.addImage(img, 'JPEG', 35, 70, 140, 140);
       doc.setGState(new doc.GState({ opacity: 1.0 })); 
 
-      // 2. Header
       doc.addImage(img, 'JPEG', 14, 10, 22, 22);
       doc.setFontSize(16);
       doc.setFont("helvetica", "bold");
@@ -140,13 +138,11 @@ const CoordinatorDashboard = () => {
       doc.setFont("helvetica", "normal");
       doc.text("Office of the Mess & Canteen Section", 42, 24);
 
-      // 3. Title Box
       doc.rect(55, 30, 100, 8);
       doc.setFontSize(12);
       doc.setFont("helvetica", "bold");
       doc.text("DEPARTMENT-WISE BILLING REPORT", 62, 36);
 
-      // 4. Metadata
       doc.setFontSize(10);
       doc.setFont("helvetica", "normal");
       const dateStr = new Date().toISOString().split('T')[0].replace(/-/g, '');
@@ -158,26 +154,49 @@ const CoordinatorDashboard = () => {
       doc.setFont("helvetica", "bold");
       doc.text(`Department: ${deptCode} DEPARTMENT`, 14, 58);
 
-      // ================= AGGREGATION LOGIC (SPLIT FACULTY/GUESTS) =================
       const facultyOrders = filteredOrders.filter(o => !o.voucherCode?.startsWith('G-'));
       const guestOrders = filteredOrders.filter(o => o.voucherCode?.startsWith('G-'));
 
-      // Aggregate Faculty
+      // -------------------------------------------------------------
+      // NEW LOGIC: Group by (Name + Date) instead of just Name
+      // -------------------------------------------------------------
       const facultyTotals = {};
       facultyOrders.forEach(order => {
-          const name = order.facultyId?.fullName || 'Deleted/Unknown User';
-          if (!facultyTotals[name]) facultyTotals[name] = { items: [], total: 0 };
-          facultyTotals[name].total += order.totalAmount;
-          facultyTotals[name].items.push(order.items.map(i => `${i.itemName}(x${i.quantity})`).join(', '));
+          const rawDate = new Date(order.createdAt || order.orderDate).toLocaleDateString('en-GB');
+          const baseName = order.facultyId?.fullName || 'Deleted/Unknown User';
+          
+          // Create a unique key like "ugcguy_12/03/2026"
+          const groupingKey = `${baseName}_${rawDate}`; 
+
+          if (!facultyTotals[groupingKey]) {
+              facultyTotals[groupingKey] = { 
+                  displayName: baseName, 
+                  date: rawDate, 
+                  items: [], 
+                  total: 0 
+              };
+          }
+          facultyTotals[groupingKey].total += order.totalAmount;
+          facultyTotals[groupingKey].items.push(order.items.map(i => `${i.itemName}(x${i.quantity})`).join(', '));
       });
 
-      // Aggregate Guests
       const guestTotals = {};
       guestOrders.forEach(order => {
-          const name = `Guest Pass: ${order.voucherCode}\n(Host: ${order.facultyId?.fullName || 'Unknown'})`;
-          if (!guestTotals[name]) guestTotals[name] = { items: [], total: 0 };
-          guestTotals[name].total += order.totalAmount;
-          guestTotals[name].items.push(order.items.map(i => `${i.itemName}(x${i.quantity})`).join(', '));
+          const rawDate = new Date(order.createdAt || order.orderDate).toLocaleDateString('en-GB');
+          const baseName = `Guest Pass: ${order.voucherCode}\n(Host: ${order.facultyId?.fullName || 'Unknown'})`;
+          
+          const groupingKey = `${baseName}_${rawDate}`;
+
+          if (!guestTotals[groupingKey]) {
+              guestTotals[groupingKey] = { 
+                  displayName: baseName, 
+                  date: rawDate, 
+                  items: [], 
+                  total: 0 
+              };
+          }
+          guestTotals[groupingKey].total += order.totalAmount;
+          guestTotals[groupingKey].items.push(order.items.map(i => `${i.itemName}(x${i.quantity})`).join(', '));
       });
 
       let currentY = 70;
@@ -187,50 +206,71 @@ const CoordinatorDashboard = () => {
       doc.setFont("helvetica", "bold");
       doc.text("SECTION A: FACULTY CONSUMPTION", 14, currentY);
       
-      const facultyTableData = Object.keys(facultyTotals).map((name, index) => [
-          index + 1, name, facultyTotals[name].items.join(' | '), `Rs. ${facultyTotals[name].total}`
+      // Map the grouped data to the table format (Adding Date column)
+      const facultyTableData = Object.values(facultyTotals).map((data, index) => [
+          index + 1, 
+          data.date,          // NEW: Date Column
+          data.displayName,   // Faculty Name
+          data.items.join(' | '), 
+          `Rs. ${data.total}`
       ]);
+      
       const facultySum = Object.values(facultyTotals).reduce((sum, val) => sum + val.total, 0);
 
       autoTable(doc, {
         startY: currentY + 3,
-        head: [['Sr', 'Faculty Name', 'Items Consumed', 'Total (Rs)']],
-        body: facultyTableData.length ? facultyTableData : [['-', 'No Faculty Orders', '-', '-']],
+        // NEW: Added 'Date' header
+        head: [['Sr', 'Date', 'Faculty Name', 'Items Consumed', 'Total (Rs)']],
+        body: facultyTableData.length ? facultyTableData : [['-', '-', 'No Faculty Orders', '-', '-']],
         theme: 'grid',
         headStyles: { fillColor: [50, 50, 50] },
         bodyStyles: { fillColor: false }, 
         alternateRowStyles: { fillColor: false },
-        styles: { fontSize: 9, cellPadding: 3 },
-        columnStyles: { 0: { halign: 'center', cellWidth: 10 }, 3: { halign: 'right', cellWidth: 30 } }
+        styles: { fontSize: 8, cellPadding: 3 }, // Slightly smaller font to fit extra column
+        columnStyles: { 
+            0: { halign: 'center', cellWidth: 10 }, 
+            1: { cellWidth: 20 }, // Date column width
+            4: { halign: 'right', cellWidth: 25 } 
+        }
       });
 
       currentY = doc.lastAutoTable.finalY;
       doc.setFont("helvetica", "bold");
+      doc.setFontSize(11);
       doc.text(`Sub-Total (Faculty): Rs. ${facultySum}/-`, 140, currentY + 8);
 
       // ================= SECTION B: GUEST =================
       currentY += 18;
       doc.text("SECTION B: GUEST/EXTERNAL CONSUMPTION", 14, currentY);
       
-      const guestTableData = Object.keys(guestTotals).map((name, index) => [
-          index + 1, name, guestTotals[name].items.join(' | '), `Rs. ${guestTotals[name].total}`
+      const guestTableData = Object.values(guestTotals).map((data, index) => [
+          index + 1, 
+          data.date, 
+          data.displayName, 
+          data.items.join(' | '), 
+          `Rs. ${data.total}`
       ]);
       const guestSum = Object.values(guestTotals).reduce((sum, val) => sum + val.total, 0);
 
       autoTable(doc, {
         startY: currentY + 3,
-        head: [['Sr', 'Guest Details', 'Items Consumed', 'Total (Rs)']],
-        body: guestTableData.length ? guestTableData : [['-', 'No Guest Orders', '-', '-']],
+        head: [['Sr', 'Date', 'Guest Details', 'Items Consumed', 'Total (Rs)']],
+        body: guestTableData.length ? guestTableData : [['-', '-', 'No Guest Orders', '-', '-']],
         theme: 'grid',
         headStyles: { fillColor: [50, 50, 50] },
         bodyStyles: { fillColor: false },
         alternateRowStyles: { fillColor: false },
-        styles: { fontSize: 9, cellPadding: 3 },
-        columnStyles: { 0: { halign: 'center', cellWidth: 10 }, 3: { halign: 'right', cellWidth: 30 } }
+        styles: { fontSize: 8, cellPadding: 3 },
+        columnStyles: { 
+            0: { halign: 'center', cellWidth: 10 }, 
+            1: { cellWidth: 20 }, 
+            4: { halign: 'right', cellWidth: 25 } 
+        }
       });
 
       currentY = doc.lastAutoTable.finalY;
       doc.setFont("helvetica", "bold");
+      doc.setFontSize(11);
       doc.text(`Sub-Total (Guest): Rs. ${guestSum}/-`, 140, currentY + 8);
 
       // ================= GRAND TOTAL =================
@@ -240,25 +280,18 @@ const CoordinatorDashboard = () => {
       doc.text(`GRAND TOTAL`, 135, currentY + 22);
       doc.text(`Rs. ${grandTotal}`, 175, currentY + 22);
 
-      // ================= SIGNATURES & FOOTER (DYNAMIC POSITIONING) =================
+      // ================= SIGNATURES & FOOTER =================
       const pageHeight = doc.internal.pageSize.getHeight();
-      
-      // Calculate where the signatures should start.
-      // They will start 30 units below the Grand Total box.
       let signatureY = currentY + 50; 
 
-      // 🚀 NEW: Page Break Logic! 
-      // If the dynamic signature position would fall off the bottom of the page,
-      // create a new page and put the signatures at the top of the new page.
       if (signatureY + 30 > pageHeight - 20) {
           doc.addPage();
-          signatureY = 40; // Start near the top of the new page
+          signatureY = 40; 
       }
 
       doc.setFontSize(9);
       doc.setFont("helvetica", "bold");
       
-      // Line 1
       doc.line(20, signatureY, 60, signatureY);
       doc.text("MESS MANAGER", 25, signatureY + 6);
       
@@ -268,14 +301,12 @@ const CoordinatorDashboard = () => {
       doc.line(160, signatureY, 200, signatureY);
       doc.text("HEAD OF DEPARTMENT", 162, signatureY + 6);
       
-      // Line 2 (Placed slightly lower than Line 1)
       doc.line(45, signatureY + 25, 85, signatureY + 25);
       doc.text("CEO", 60, signatureY + 31);
       
       doc.line(135, signatureY + 25, 175, signatureY + 25);
       doc.text("PRINCIPAL", 148, signatureY + 31);
 
-      // System Footer (Always stays at the absolute bottom of the page)
       doc.setFont("helvetica", "normal");
       doc.setFontSize(7);
       doc.text("SYSTEM GENERATED REPORT | PICT CANTEEN & MESS SECTION", 65, pageHeight - 5);

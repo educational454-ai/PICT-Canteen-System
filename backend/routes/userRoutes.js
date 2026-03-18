@@ -1,41 +1,30 @@
 const express = require('express');
 const router = express.Router();
-const User = require('../models/User'); // Bring in the blueprint we just made!
+const User = require('../models/User'); 
 
 // Route: Create a new user
-// Method: POST (used for sending data)
 router.post('/register', async (req, res) => {
     try {
-        // 1. Grab the data sent from the frontend/Thunder Client
         const { name, email, password, role } = req.body;
-
-        // 2. Create a new User using our Mongoose model
         const newUser = new User({
             name: name,
             email: email,
             password: password, 
             role: role
         });
-
-        // 3. Save it to the MongoDB database!
         await newUser.save();
-
-        // 4. Send a success message back
         res.status(201).json({ message: "User created successfully!", user: newUser });
-
     } catch (error) {
-        // If something goes wrong (like a missing email), send an error
         res.status(400).json({ error: "Failed to create user", details: error.message });
     }
 });
 
-// Add/Update the login route in userRoutes.js
+// Route: Login user
 router.post('/login', async (req, res) => {
     try {
         const { email, password } = req.body;
-        console.log(`Login attempt for: ${email}`); // DEBUG PRINT
+        console.log(`Login attempt for: ${email}`); 
 
-        // Find user and populate department details
         const user = await User.findOne({ email }).populate('departmentId');
         
         if (!user) {
@@ -48,8 +37,8 @@ router.post('/login', async (req, res) => {
             return res.status(401).json({ error: "Invalid email or password" });
         }
 
-        // SAFETY CHECK: Ensure the department actually linked!
-        if (!user.departmentId) {
+        // 🚀 THE FIX 1: Allow SUPER_ADMIN to bypass the department check!
+        if (!user.departmentId && user.role !== 'SUPER_ADMIN') {
             console.log("Error: User exists, but departmentId is missing or invalid!");
             return res.status(500).json({ error: "User is not assigned to a valid department." });
         }
@@ -59,9 +48,10 @@ router.post('/login', async (req, res) => {
             user: {
                 name: user.name,
                 role: user.role,
-                deptId: user.departmentId._id,
-                deptCode: user.departmentId.code,
-                deptName: user.departmentId.name
+                // 🚀 THE FIX 2: Safely handle missing department using optional chaining (?.)
+                deptId: user.departmentId?._id || null, 
+                deptCode: user.departmentId?.code || 'GLOBAL',
+                deptName: user.departmentId?.name || 'Global Administration'
             }
         });
     } catch (error) {
@@ -70,5 +60,4 @@ router.post('/login', async (req, res) => {
     }
 });
 
-// Export the router so server.js can use it
 module.exports = router;

@@ -3,6 +3,7 @@ import LoginPage from './pages/LoginPage';
 import MenuPage from './pages/MenuPage';
 import CoordinatorDashboard from './pages/CoordinatorDashboard';
 import CanteenManagerDashboard from './pages/CanteenManagerDashboard';
+import SuperAdminDashboard from './pages/SuperAdminDashboard';
 
 // 1. Import your Footer component
 import Footer from './components/Footer';
@@ -19,6 +20,7 @@ function App() {
           <Route path="/menu" element={<MenuPage />} />
           <Route path="/coordinator" element={<CoordinatorDashboard />} />
           <Route path="/manager" element={<CanteenManagerDashboard />} />
+          <Route path="/admin" element={<SuperAdminDashboard />} />
         </Routes>
       </div>
 

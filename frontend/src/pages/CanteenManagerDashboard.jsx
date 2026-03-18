@@ -109,7 +109,7 @@ const CanteenManagerDashboard = () => {
   };
 
   // ==============================================================
-  // OFFICIAL PDF REPORT GENERATION 
+  // OFFICIAL PDF REPORT GENERATION (DATE-WISE & FLEX SIGNATURES)
   // ==============================================================
   const downloadReport = () => {
       const doc = new jsPDF();
@@ -117,7 +117,7 @@ const CanteenManagerDashboard = () => {
       img.src = '/image1.jpeg'; 
       
       img.onload = () => {
-        // 1. Watermark (Visible through transparent tables)
+        // 1. Transparent Watermark
         doc.setGState(new doc.GState({ opacity: 0.15 }));
         doc.addImage(img, 'JPEG', 35, 70, 140, 140);
         doc.setGState(new doc.GState({ opacity: 1.0 })); 
@@ -143,7 +143,8 @@ const CanteenManagerDashboard = () => {
         
         // Generate dynamic Ref No format
         const deptCodeName = filterDept !== 'All Departments' ? filterDept.substring(0, 4).toUpperCase() : 'ALL';
-        const refNo = `Ref No: PICT/CNTN/${new Date().getFullYear()}/${deptCodeName}-01`;
+        const dateStr = new Date().toISOString().split('T')[0].replace(/-/g, '');
+        const refNo = `Ref No: PICT/CNTN/${dateStr}/${deptCodeName}-01`;
         const dateRangeText = `Date: ${startDate ? new Date(startDate).toLocaleDateString('en-GB') : 'All'} to ${endDate ? new Date(endDate).toLocaleDateString('en-GB') : new Date().toLocaleDateString('en-GB')}`;
         
         doc.text(refNo, 14, 50);
@@ -151,26 +152,38 @@ const CanteenManagerDashboard = () => {
         doc.setFont("helvetica", "bold");
         doc.text(`Department: ${filterDept.toUpperCase()} DEPARTMENT`, 14, 58);
 
-        // ================= AGGREGATION LOGIC =================
+        // ================= AGGREGATION LOGIC (SPLIT FACULTY/GUESTS & DATE-WISE) =================
         const facultyOrders = filteredOrders.filter(o => !o.voucherCode?.startsWith('G-'));
         const guestOrders = filteredOrders.filter(o => o.voucherCode?.startsWith('G-'));
 
         // Aggregate Faculty
         const facultyTotals = {};
         facultyOrders.forEach(order => {
-            const name = order.facultyId?.fullName || 'Unknown Faculty';
-            if (!facultyTotals[name]) facultyTotals[name] = { items: [], total: 0 };
-            facultyTotals[name].total += order.totalAmount;
-            facultyTotals[name].items.push(order.items.map(i => `${i.itemName}(x${i.quantity})`).join(', '));
+            const rawDate = new Date(order.createdAt || order.orderDate).toLocaleDateString('en-GB');
+            const baseName = order.facultyId?.fullName || 'Unknown Faculty';
+            
+            const groupingKey = `${baseName}_${rawDate}`; 
+
+            if (!facultyTotals[groupingKey]) {
+                facultyTotals[groupingKey] = { displayName: baseName, date: rawDate, items: [], total: 0 };
+            }
+            facultyTotals[groupingKey].total += order.totalAmount;
+            facultyTotals[groupingKey].items.push(order.items.map(i => `${i.itemName}(x${i.quantity})`).join(', '));
         });
 
         // Aggregate Guests
         const guestTotals = {};
         guestOrders.forEach(order => {
-            const name = `Guest Pass: ${order.voucherCode}\n(Host: ${order.facultyId?.fullName || 'Unknown'})`;
-            if (!guestTotals[name]) guestTotals[name] = { items: [], total: 0 };
-            guestTotals[name].total += order.totalAmount;
-            guestTotals[name].items.push(order.items.map(i => `${i.itemName}(x${i.quantity})`).join(', '));
+            const rawDate = new Date(order.createdAt || order.orderDate).toLocaleDateString('en-GB');
+            const baseName = `Guest Pass: ${order.voucherCode}\n(Host: ${order.facultyId?.fullName || 'Unknown'})`;
+            
+            const groupingKey = `${baseName}_${rawDate}`;
+
+            if (!guestTotals[groupingKey]) {
+                guestTotals[groupingKey] = { displayName: baseName, date: rawDate, items: [], total: 0 };
+            }
+            guestTotals[groupingKey].total += order.totalAmount;
+            guestTotals[groupingKey].items.push(order.items.map(i => `${i.itemName}(x${i.quantity})`).join(', '));
         });
 
         let currentY = 70;
@@ -180,50 +193,52 @@ const CanteenManagerDashboard = () => {
         doc.setFont("helvetica", "bold");
         doc.text("SECTION A: FACULTY CONSUMPTION", 14, currentY);
         
-        const facultyTableData = Object.keys(facultyTotals).map((name, index) => [
-            index + 1, name, facultyTotals[name].items.join(' | '), `Rs. ${facultyTotals[name].total}`
+        const facultyTableData = Object.values(facultyTotals).map((data, index) => [
+            index + 1, data.date, data.displayName, data.items.join(' | '), `Rs. ${data.total}`
         ]);
         const facultySum = Object.values(facultyTotals).reduce((sum, val) => sum + val.total, 0);
 
         autoTable(doc, {
           startY: currentY + 3,
-          head: [['Sr', 'Faculty Name', 'Items Consumed', 'Total (Rs)']],
-          body: facultyTableData.length ? facultyTableData : [['-', 'No Faculty Orders', '-', '-']],
+          head: [['Sr', 'Date', 'Faculty Name', 'Items Consumed', 'Total (Rs)']],
+          body: facultyTableData.length ? facultyTableData : [['-', '-', 'No Faculty Orders', '-', '-']],
           theme: 'grid',
           headStyles: { fillColor: [50, 50, 50] },
           bodyStyles: { fillColor: false }, // Ensures watermark is visible
           alternateRowStyles: { fillColor: false },
-          styles: { fontSize: 9, cellPadding: 3 },
-          columnStyles: { 0: { halign: 'center', cellWidth: 10 }, 3: { halign: 'right', cellWidth: 30 } }
+          styles: { fontSize: 8, cellPadding: 3 }, // Slightly smaller font to fit extra column
+          columnStyles: { 0: { halign: 'center', cellWidth: 10 }, 1: { cellWidth: 20 }, 4: { halign: 'right', cellWidth: 25 } }
         });
 
         currentY = doc.lastAutoTable.finalY;
         doc.setFont("helvetica", "bold");
+        doc.setFontSize(11);
         doc.text(`Sub-Total (Faculty): Rs. ${facultySum}/-`, 140, currentY + 8);
 
         // ================= SECTION B: GUEST =================
         currentY += 18;
         doc.text("SECTION B: GUEST/EXTERNAL CONSUMPTION", 14, currentY);
         
-        const guestTableData = Object.keys(guestTotals).map((name, index) => [
-            index + 1, name, guestTotals[name].items.join(' | '), `Rs. ${guestTotals[name].total}`
+        const guestTableData = Object.values(guestTotals).map((data, index) => [
+            index + 1, data.date, data.displayName, data.items.join(' | '), `Rs. ${data.total}`
         ]);
         const guestSum = Object.values(guestTotals).reduce((sum, val) => sum + val.total, 0);
 
         autoTable(doc, {
           startY: currentY + 3,
-          head: [['Sr', 'Guest Details', 'Items Consumed', 'Total (Rs)']],
-          body: guestTableData.length ? guestTableData : [['-', 'No Guest Orders', '-', '-']],
+          head: [['Sr', 'Date', 'Guest Details', 'Items Consumed', 'Total (Rs)']],
+          body: guestTableData.length ? guestTableData : [['-', '-', 'No Guest Orders', '-', '-']],
           theme: 'grid',
           headStyles: { fillColor: [50, 50, 50] },
           bodyStyles: { fillColor: false },
           alternateRowStyles: { fillColor: false },
-          styles: { fontSize: 9, cellPadding: 3 },
-          columnStyles: { 0: { halign: 'center', cellWidth: 10 }, 3: { halign: 'right', cellWidth: 30 } }
+          styles: { fontSize: 8, cellPadding: 3 },
+          columnStyles: { 0: { halign: 'center', cellWidth: 10 }, 1: { cellWidth: 20 }, 4: { halign: 'right', cellWidth: 25 } }
         });
 
         currentY = doc.lastAutoTable.finalY;
         doc.setFont("helvetica", "bold");
+        doc.setFontSize(11);
         doc.text(`Sub-Total (Guest): Rs. ${guestSum}/-`, 140, currentY + 8);
 
         // ================= GRAND TOTAL =================
@@ -233,29 +248,42 @@ const CanteenManagerDashboard = () => {
         doc.text(`GRAND TOTAL`, 135, currentY + 22);
         doc.text(`Rs. ${grandTotal}`, 175, currentY + 22);
 
-        // ================= SIGNATURES & FOOTER (5-Signature Format) =================
+        // ================= SIGNATURES & FOOTER (DYNAMIC POSITIONING) =================
         const pageHeight = doc.internal.pageSize.getHeight();
+        
+        // Calculate where the signatures should start.
+        // They will start 50 units below the Grand Total box.
+        let signatureY = currentY + 50; 
+
+        // 🚀 NEW: Page Break Logic! 
+        // If the dynamic signature position would fall off the bottom of the page,
+        // create a new page and put the signatures at the top of the new page.
+        if (signatureY + 30 > pageHeight - 20) {
+            doc.addPage();
+            signatureY = 40; // Start near the top of the new page
+        }
+
         doc.setFontSize(9);
         doc.setFont("helvetica", "bold");
         
         // Line 1
-        doc.line(20, pageHeight - 45, 60, pageHeight - 45);
-        doc.text("MESS MANAGER", 25, pageHeight - 39);
+        doc.line(20, signatureY, 60, signatureY);
+        doc.text("MESS MANAGER", 25, signatureY + 6);
         
-        doc.line(85, pageHeight - 45, 135, pageHeight - 45);
-        doc.text("PRACTICAL COORDINATOR", 87, pageHeight - 39);
+        doc.line(85, signatureY, 135, signatureY);
+        doc.text("PRACTICAL COORDINATOR", 87, signatureY + 6);
         
-        doc.line(160, pageHeight - 45, 200, pageHeight - 45);
-        doc.text("HEAD OF DEPARTMENT", 162, pageHeight - 39);
+        doc.line(160, signatureY, 200, signatureY);
+        doc.text("HEAD OF DEPARTMENT", 162, signatureY + 6);
         
-        // Line 2
-        doc.line(45, pageHeight - 20, 85, pageHeight - 20);
-        doc.text("CEO", 60, pageHeight - 14);
+        // Line 2 (Placed slightly lower than Line 1)
+        doc.line(45, signatureY + 25, 85, signatureY + 25);
+        doc.text("CEO", 60, signatureY + 31);
         
-        doc.line(135, pageHeight - 20, 175, pageHeight - 20);
-        doc.text("PRINCIPAL", 148, pageHeight - 14);
+        doc.line(135, signatureY + 25, 175, signatureY + 25);
+        doc.text("PRINCIPAL", 148, signatureY + 31);
 
-        // System Footer
+        // System Footer (Always stays at the absolute bottom of the page)
         doc.setFont("helvetica", "normal");
         doc.setFontSize(7);
         doc.text("SYSTEM GENERATED REPORT | PICT CANTEEN & MESS SECTION", 65, pageHeight - 5);
@@ -318,7 +346,7 @@ const CanteenManagerDashboard = () => {
                       <div className="flex flex-wrap items-end gap-5 mb-8 bg-slate-50 p-4 rounded-xl border border-slate-100">
                           <div>
                               <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-1.5">Department</label>
-                              <select value={filterDept} onChange={(e) => setFilterDept(e.target.value)} className="w-48 p-2.5 border border-slate-200 rounded-lg text-sm outline-none focus:border-blue-500 bg-white">
+                              <select value={filterDept} onChange={(e) => setFilterDept(e.target.value)} className="w-48 p-2.5 border border-slate-200 rounded-lg text-sm outline-none focus:border-blue-50 bg-white">
                                   <option value="All Departments">All Departments</option>
                                   {departments.map(d => <option key={d._id} value={d.name}>{d.name}</option>)}
                               </select>

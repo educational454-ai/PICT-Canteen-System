@@ -13,7 +13,6 @@ const LoginPage = () => {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
-  // Function to handle Smart Voucher Login
   const handleVoucherLogin = async (e) => {
     e.preventDefault();
     if (!voucher) return setError("Please enter a voucher code");
@@ -36,7 +35,6 @@ const LoginPage = () => {
     }
   };
 
-  // Function to handle Admin/Manager Login
   const handleAdminLogin = async (e) => {
     e.preventDefault();
     setLoading(true);
@@ -45,12 +43,24 @@ const LoginPage = () => {
       const { user } = res.data;
 
       sessionStorage.setItem('token', 'authenticated'); 
-      sessionStorage.setItem('deptId', user.deptId);
-      sessionStorage.setItem('deptCode', user.deptCode);
-      sessionStorage.setItem('deptName', user.deptName);
       sessionStorage.setItem('userName', user.name);
+      sessionStorage.setItem('userRole', user.role); 
+      
+      if (user.deptId) {
+          sessionStorage.setItem('deptId', user.deptId);
+          sessionStorage.setItem('deptCode', user.deptCode);
+          sessionStorage.setItem('deptName', user.deptName);
+      }
 
-      navigate('/coordinator');
+      // 🚀 THE ROLE CHECK 🚀
+      if (user.role === 'SUPER_ADMIN') {
+          navigate('/admin');
+      } else if (user.role === 'MANAGER') {
+          navigate('/manager'); 
+      } else {
+          navigate('/coordinator');
+      }
+
     } catch (err) {
       setError("Invalid Email or Password");
     } finally {
@@ -59,34 +69,16 @@ const LoginPage = () => {
   };
 
   return (
-    <div 
-      className="min-h-screen flex flex-col justify-center items-center p-4 relative"
-      style={{ 
-        backgroundImage: "url('/image2.jpg')", 
-        backgroundSize: 'cover', 
-        backgroundPosition: 'center',
-        backgroundAttachment: 'fixed'
-      }}
-    >
-      {/* Dark overlay to make the text and white card pop out beautifully */}
+    <div className="min-h-screen flex flex-col justify-center items-center p-4 relative" style={{ backgroundImage: "url('/image2.jpg')", backgroundSize: 'cover', backgroundPosition: 'center', backgroundAttachment: 'fixed' }}>
       <div className="absolute inset-0 bg-[#0a1128]/60 backdrop-blur-[2px]"></div>
 
-      {/* z-10 ensures the content sits above the background overlay */}
       <div className="relative z-10 w-full max-w-md">
-        
-        {/* Header Section */}
         <div className="mb-8 text-center">
-          {/* UPDATED: Replaced the 'P' with your image1.jpeg logo */}
-          <img 
-            src="/image1.jpeg" 
-            alt="PICT Logo" 
-            className="w-24 h-24 rounded-2xl object-cover mx-auto mb-4 shadow-2xl border border-white/20 bg-white p-1" 
-          />
+          <img src="/image1.jpeg" alt="PICT Logo" className="w-24 h-24 rounded-2xl object-cover mx-auto mb-4 shadow-2xl border border-white/20 bg-white p-1" />
           <h1 className="text-3xl font-black text-white tracking-tight drop-shadow-lg">PICT CANTEEN</h1>
           <p className="text-blue-200 font-medium drop-shadow">Smart Canteen Management System</p>
         </div>
 
-        {/* Login Box */}
         <div className="bg-white p-8 rounded-3xl shadow-2xl w-full border border-slate-100">
           <div className="flex mb-8 bg-slate-100 rounded-xl p-1.5 shadow-inner">
             <button onClick={() => { setIsVoucherLogin(true); setError(''); }} className={`flex-1 py-2.5 rounded-lg flex items-center justify-center gap-2 font-semibold transition-all ${isVoucherLogin ? 'bg-white shadow-sm text-blue-600' : 'text-slate-500 hover:text-slate-700'}`}>
