@@ -5,6 +5,7 @@ import * as XLSX from 'xlsx';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import API from '../api/axios';
+import toast from 'react-hot-toast'; // 🚀 IMPORT TOAST
 
 const CoordinatorDashboard = () => {
   const navigate = useNavigate();
@@ -100,26 +101,33 @@ const CoordinatorDashboard = () => {
     const workbook = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(workbook, worksheet, "Faculty");
     XLSX.writeFile(workbook, `${deptCode}_Faculty_Vouchers.xlsx`);
+    toast.success("CSV Downloaded!"); // 🚀 TOAST
   };
 
   const handleExportReportsCSV = () => {
-    const exportData = filteredOrders.map(o => ({
-      "Date": new Date(o.orderDate || o.createdAt).toLocaleDateString(),
-      "Time": new Date(o.orderDate || o.createdAt).toLocaleTimeString(),
-      "Examiner Name": o.facultyId?.fullName || "Deleted User",
-      "Voucher Code": o.facultyId?.voucherCode || "N/A",
-      "Items Ordered": o.items.map(i => `${i.itemName} (x${i.quantity})`).join(', '),
-      "Amount (₹)": o.totalAmount
-    }));
+    const exportData = filteredOrders.map(o => {
+      const isGuest = o.voucherCode?.startsWith('G-');
+      const actualGuestName = o.guestName || guests.find(g => g.voucherCode === o.voucherCode)?.guestName || 'Guest';
+      const hostName = o.facultyId?.fullName || "Deleted User";
+
+      return {
+        "Date": new Date(o.orderDate || o.createdAt).toLocaleDateString(),
+        "Time": new Date(o.orderDate || o.createdAt).toLocaleTimeString(),
+        "Billed To": isGuest ? `${actualGuestName} (Guest)` : hostName,
+        "Host Faculty": isGuest ? hostName : "N/A",
+        "Voucher Code": o.voucherCode || "N/A",
+        "Items Ordered": o.items.map(i => `${i.itemName} (x${i.quantity})`).join(', '),
+        "Amount (₹)": o.totalAmount
+      };
+    });
+    
     const worksheet = XLSX.utils.json_to_sheet(exportData);
     const workbook = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(workbook, worksheet, "Orders");
     XLSX.writeFile(workbook, `${deptCode}_Canteen_Usage_Report.xlsx`);
+    toast.success("Orders CSV Downloaded!"); // 🚀 TOAST
   };
 
-  // ==============================================================
-  // 🚀 UPGRADED: DATE-WISE GROUPING FOR PDF REPORT 🚀
-  // ==============================================================
   const generatePDFInvoice = () => {
     const doc = new jsPDF();
     const img = new Image();
@@ -157,42 +165,32 @@ const CoordinatorDashboard = () => {
       const facultyOrders = filteredOrders.filter(o => !o.voucherCode?.startsWith('G-'));
       const guestOrders = filteredOrders.filter(o => o.voucherCode?.startsWith('G-'));
 
-      // -------------------------------------------------------------
-      // NEW LOGIC: Group by (Name + Date) instead of just Name
-      // -------------------------------------------------------------
       const facultyTotals = {};
       facultyOrders.forEach(order => {
           const rawDate = new Date(order.createdAt || order.orderDate).toLocaleDateString('en-GB');
           const baseName = order.facultyId?.fullName || 'Deleted/Unknown User';
           
-          // Create a unique key like "ugcguy_12/03/2026"
           const groupingKey = `${baseName}_${rawDate}`; 
 
           if (!facultyTotals[groupingKey]) {
-              facultyTotals[groupingKey] = { 
-                  displayName: baseName, 
-                  date: rawDate, 
-                  items: [], 
-                  total: 0 
-              };
+              facultyTotals[groupingKey] = { displayName: baseName, date: rawDate, items: [], total: 0 };
           }
           facultyTotals[groupingKey].total += order.totalAmount;
           facultyTotals[groupingKey].items.push(order.items.map(i => `${i.itemName}(x${i.quantity})`).join(', '));
       });
 
       const guestTotals = {};
-        guestOrders.forEach(order => {
-            const rawDate = new Date(order.createdAt || order.orderDate).toLocaleDateString('en-GB');
-            
-            // 🚀 THE FIX: Use the actual guest name we added in the backend!
-            const actualGuestName = order.guestName || 'Guest';
-            const baseName = `${actualGuestName} (${order.voucherCode})\n(Host: ${order.facultyId?.fullName || 'Unknown'})`;
-            
-            const groupingKey = `${baseName}_${rawDate}`;
-            if (!guestTotals[groupingKey]) guestTotals[groupingKey] = { displayName: baseName, date: rawDate, items: [], total: 0 };
-            guestTotals[groupingKey].total += order.totalAmount;
-            guestTotals[groupingKey].items.push(order.items.map(i => `${i.itemName}(x${i.quantity})`).join(', '));
-        });
+      guestOrders.forEach(order => {
+          const rawDate = new Date(order.createdAt || order.orderDate).toLocaleDateString('en-GB');
+          
+          const actualGuestName = order.guestName || guests.find(g => g.voucherCode === order.voucherCode)?.guestName || 'Guest';
+          const baseName = `${actualGuestName} (${order.voucherCode})\n(Host: ${order.facultyId?.fullName || 'Unknown'})`;
+          
+          const groupingKey = `${baseName}_${rawDate}`;
+          if (!guestTotals[groupingKey]) guestTotals[groupingKey] = { displayName: baseName, date: rawDate, items: [], total: 0 };
+          guestTotals[groupingKey].total += order.totalAmount;
+          guestTotals[groupingKey].items.push(order.items.map(i => `${i.itemName}(x${i.quantity})`).join(', '));
+      });
 
       let currentY = 70;
 
@@ -201,32 +199,19 @@ const CoordinatorDashboard = () => {
       doc.setFont("helvetica", "bold");
       doc.text("SECTION A: FACULTY CONSUMPTION", 14, currentY);
       
-      // Map the grouped data to the table format (Adding Date column)
-      const facultyTableData = Object.values(facultyTotals).map((data, index) => [
-          index + 1, 
-          data.date,          // NEW: Date Column
-          data.displayName,   // Faculty Name
-          data.items.join(' | '), 
-          `Rs. ${data.total}`
-      ]);
-      
+      const facultyTableData = Object.values(facultyTotals).map((data, index) => [ index + 1, data.date, data.displayName, data.items.join(' | '), `Rs. ${data.total}` ]);
       const facultySum = Object.values(facultyTotals).reduce((sum, val) => sum + val.total, 0);
 
       autoTable(doc, {
         startY: currentY + 3,
-        // NEW: Added 'Date' header
         head: [['Sr', 'Date', 'Faculty Name', 'Items Consumed', 'Total (Rs)']],
         body: facultyTableData.length ? facultyTableData : [['-', '-', 'No Faculty Orders', '-', '-']],
         theme: 'grid',
         headStyles: { fillColor: [50, 50, 50] },
         bodyStyles: { fillColor: false }, 
         alternateRowStyles: { fillColor: false },
-        styles: { fontSize: 8, cellPadding: 3 }, // Slightly smaller font to fit extra column
-        columnStyles: { 
-            0: { halign: 'center', cellWidth: 10 }, 
-            1: { cellWidth: 20 }, // Date column width
-            4: { halign: 'right', cellWidth: 25 } 
-        }
+        styles: { fontSize: 8, cellPadding: 3 },
+        columnStyles: { 0: { halign: 'center', cellWidth: 10 }, 1: { cellWidth: 20 }, 4: { halign: 'right', cellWidth: 25 } }
       });
 
       currentY = doc.lastAutoTable.finalY;
@@ -238,13 +223,7 @@ const CoordinatorDashboard = () => {
       currentY += 18;
       doc.text("SECTION B: GUEST/EXTERNAL CONSUMPTION", 14, currentY);
       
-      const guestTableData = Object.values(guestTotals).map((data, index) => [
-          index + 1, 
-          data.date, 
-          data.displayName, 
-          data.items.join(' | '), 
-          `Rs. ${data.total}`
-      ]);
+      const guestTableData = Object.values(guestTotals).map((data, index) => [ index + 1, data.date, data.displayName, data.items.join(' | '), `Rs. ${data.total}` ]);
       const guestSum = Object.values(guestTotals).reduce((sum, val) => sum + val.total, 0);
 
       autoTable(doc, {
@@ -256,11 +235,7 @@ const CoordinatorDashboard = () => {
         bodyStyles: { fillColor: false },
         alternateRowStyles: { fillColor: false },
         styles: { fontSize: 8, cellPadding: 3 },
-        columnStyles: { 
-            0: { halign: 'center', cellWidth: 10 }, 
-            1: { cellWidth: 20 }, 
-            4: { halign: 'right', cellWidth: 25 } 
-        }
+        columnStyles: { 0: { halign: 'center', cellWidth: 10 }, 1: { cellWidth: 20 }, 4: { halign: 'right', cellWidth: 25 } }
       });
 
       currentY = doc.lastAutoTable.finalY;
@@ -304,25 +279,38 @@ const CoordinatorDashboard = () => {
 
       doc.setFont("helvetica", "normal");
       doc.setFontSize(7);
-      doc.text("SYSTEM GENERATED REPORT | PICT CANTEEN & MESS SECTION", 65, pageHeight - 5);
+      const downloadTime = new Date().toLocaleString('en-GB', {
+          day: '2-digit', month: 'short', year: 'numeric', 
+          hour: '2-digit', minute: '2-digit', hour12: true
+      });
+      doc.text(`SYSTEM GENERATED REPORT | PICT CANTEEN & MESS SECTION | DOWNLOADED: ${downloadTime.toUpperCase()}`, 48, pageHeight - 5);
 
       doc.save(`${deptCode}_Billing_Report.pdf`);
+      toast.success("PDF Report Downloaded!"); // 🚀 TOAST
     };
 
-    img.onerror = () => alert("Failed to load watermark image.");
+    img.onerror = () => toast.error("Failed to load watermark image."); // 🚀 TOAST
   };
 
   const handleDelete = async (id) => {
     if (window.confirm("Are you sure you want to revoke this voucher and remove the examiner?")) {
-      try { await API.delete(`/faculty/remove/${id}`); fetchFaculty(); } 
-      catch (err) { alert("Failed to delete."); }
+      try { 
+          await API.delete(`/faculty/remove/${id}`); 
+          toast.success("Examiner deleted and voucher revoked."); // 🚀 TOAST
+          fetchFaculty(); 
+      } 
+      catch (err) { toast.error("Failed to delete."); } // 🚀 TOAST
     }
   };
 
   const handleResetSystem = async () => {
      if(window.confirm(`WARNING: This will deactivate ALL faculty records for ${deptCode}. Are you absolutely sure?`)) {
-         try { await API.delete(`/faculty/department/${deptId}/reset`); setFaculty([]); alert(`All faculty records for ${deptCode} have been cleared.`);} 
-         catch (err) { alert("Failed to reset system."); }
+         try { 
+             await API.delete(`/faculty/department/${deptId}/reset`); 
+             setFaculty([]); 
+             toast.success(`All faculty records for ${deptCode} have been cleared.`); // 🚀 TOAST
+         } 
+         catch (err) { toast.error("Failed to reset system."); } // 🚀 TOAST
      }
   };
 
@@ -335,7 +323,7 @@ const CoordinatorDashboard = () => {
   const handleAddSingle = async (e) => {
     e.preventDefault();
     if (!deptId || !deptCode) {
-        alert("Authentication Error: Department ID is missing. Please log out and log back in.");
+        toast.error("Authentication Error: Department ID is missing. Please log out and log back in."); // 🚀 TOAST
         return;
     }
 
@@ -343,19 +331,20 @@ const CoordinatorDashboard = () => {
       await API.post('/faculty/add', { ...formData, departmentId: deptId, deptCode: deptCode });
       setIsModalOpen(false);
       setFormData({ fullName: '', email: '', mobile: '', academicYear: '2025-26', validFrom: new Date().toISOString().split('T')[0], validTill: new Date(new Date().setDate(new Date().getDate() + 7)).toISOString().split('T')[0] });
+      toast.success("Examiner added successfully!"); // 🚀 TOAST
       fetchFaculty();
-    } catch (err) { alert("Failed to add faculty."); }
+    } catch (err) { toast.error("Failed to add faculty."); } // 🚀 TOAST
   };
 
   const handleAddGuest = async (e) => {
     e.preventDefault();
     try {
         const res = await API.post('/guests/add', guestFormData);
-        alert(`Success! Guest Code is: ${res.data.voucher}`);
+        toast.success(`Success! Guest Code is: ${res.data.voucher}`); // 🚀 TOAST
         setIsGuestModalOpen(false);
         setGuestFormData({ guestName: '', facultyVoucher: '', validFrom: new Date().toISOString().split('T')[0], validTill: new Date().toISOString().split('T')[0] });
         fetchGuests();
-    } catch (err) { alert(`Failed to add guest: ${err.response?.data?.error || err.message}`); }
+    } catch (err) { toast.error(`Failed to add guest: ${err.response?.data?.error || err.message}`); } // 🚀 TOAST
   };
 
   const handleFileUpload = (e) => { 
@@ -391,13 +380,13 @@ const CoordinatorDashboard = () => {
       const formattedData = Array.from(facultyMap.values());
       try {
         const res = await API.post('/faculty/bulk-add', formattedData);
-        alert(`Success! Added ${res.data.added} new examiners and extended ${res.data.extended} existing vouchers.`);
+        toast.success(`Added ${res.data.added} new examiners and extended ${res.data.extended} existing vouchers.`); // 🚀 TOAST
         fetchFaculty(); 
         if(fileInputRef.current) fileInputRef.current.value = ""; 
       } catch (err) { 
         console.error("Upload Error:", err.response?.data || err);
         const errorMessage = err.response?.data?.details || err.response?.data?.error || err.message;
-        alert(`Upload Failed: ${errorMessage}`); 
+        toast.error(`Upload Failed: ${errorMessage}`); // 🚀 TOAST
       }
     };
     reader.readAsBinaryString(file);
@@ -615,10 +604,8 @@ const CoordinatorDashboard = () => {
           <header className="bg-white p-4 md:px-8 border-b flex flex-col xl:flex-row justify-between items-start xl:items-center gap-4 shadow-sm z-10 shrink-0">
               <h1 className="text-xl md:text-2xl font-bold text-gray-800">Canteen Usage Logs</h1>
               
-              {/* Responsive Container for Filters and Buttons */}
               <div className="flex flex-col lg:flex-row gap-4 w-full xl:w-auto items-start lg:items-center">
                  
-                 {/* Date Filters Container */}
                  <div className="flex flex-col sm:flex-row items-start sm:items-center gap-3 lg:pr-4 lg:border-r border-gray-200 w-full lg:w-auto">
                     <div className="flex items-center gap-2 w-full sm:w-auto">
                         <span className="text-[10px] font-bold text-gray-400 uppercase w-10 sm:w-auto">From:</span>
@@ -630,7 +617,6 @@ const CoordinatorDashboard = () => {
                     </div>
                  </div>
                 
-                 {/* Download Buttons Container */}
                  <div className="flex flex-row gap-2 w-full lg:w-auto">
                     <button onClick={handleExportReportsCSV} className="flex-1 lg:flex-none justify-center px-4 py-2 border-2 border-gray-100 rounded-lg text-xs font-bold flex items-center gap-1.5 text-gray-600 hover:bg-gray-50 transition-all"><Download size={16} /> Excel</button>
                     <button onClick={generatePDFInvoice} className="flex-1 lg:flex-none justify-center px-4 py-2 bg-blue-600 text-white rounded-lg text-xs font-bold flex items-center gap-1.5 hover:bg-blue-700 transition-all shadow-lg shadow-blue-200"><FileText size={16} /> PDF Bill</button>
@@ -647,21 +633,45 @@ const CoordinatorDashboard = () => {
               <div className="bg-white rounded-2xl border shadow-sm flex-1 overflow-y-auto overflow-x-auto relative">
                 <table className="w-full text-left border-collapse min-w-[700px]">
                   <thead className="bg-gray-50/95 backdrop-blur-sm border-b border-gray-100 text-[10px] font-bold text-gray-400 uppercase tracking-widest sticky top-0 z-10 shadow-sm">
-                    <tr><th className="p-4 pl-6 md:pl-8">Date & Time</th><th className="p-4">Examiner Name</th><th className="p-4">Voucher Used</th><th className="p-4">Items Consumed</th><th className="p-4 text-right pr-6 md:pr-8">Order Total</th></tr>
+                    <tr>
+                      <th className="p-4 pl-6 md:pl-8">Date & Time</th>
+                      <th className="p-4">Billed To</th>
+                      <th className="p-4">Voucher Used</th>
+                      <th className="p-4">Items Consumed</th>
+                      <th className="p-4 text-right pr-6 md:pr-8">Order Total</th>
+                    </tr>
                   </thead>
                   <tbody className="divide-y divide-gray-50 text-sm">
                     {filteredOrders.length === 0 ? (
                       <tr><td colSpan="5" className="text-center p-8 text-gray-400">No orders found in this date range.</td></tr>
                     ) : (
-                      filteredOrders.map((order) => (
-                        <tr key={order._id} className="hover:bg-gray-50/50 transition-all">
-                          <td className="p-4 pl-6 md:pl-8"><p className="font-bold text-gray-800 text-sm">{new Date(order.orderDate || order.createdAt).toLocaleDateString('en-GB')}</p><p className="text-[11px] text-gray-400 font-medium">{new Date(order.orderDate || order.createdAt).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</p></td>
-                          <td className="p-4 font-bold text-gray-700">{order.facultyId?.fullName || <span className="text-red-400 italic">Deleted User</span>}</td>
-                          <td className="p-4"><span className="font-mono font-bold text-blue-600 bg-blue-50/50 px-2 py-1 rounded text-[11px]">{order.facultyId?.voucherCode || "N/A"}</span></td>
-                          <td className="p-4 text-xs text-gray-500">{order.items.map(item => `${item.itemName} (x${item.quantity})`).join(', ')}</td>
-                          <td className="p-4 pr-6 md:pr-8 text-right font-black text-green-600">₹{order.totalAmount}</td>
-                        </tr>
-                      ))
+                      filteredOrders.map((order) => {
+                        const isGuest = order.voucherCode?.startsWith('G-');
+                        const actualGuestName = order.guestName || guests.find(g => g.voucherCode === order.voucherCode)?.guestName || 'Guest';
+                        const hostName = order.facultyId?.fullName || <span className="text-red-400 italic">Deleted User</span>;
+
+                        return (
+                          <tr key={order._id} className="hover:bg-gray-50/50 transition-all">
+                            <td className="p-4 pl-6 md:pl-8">
+                                <p className="font-bold text-gray-800 text-sm">{new Date(order.orderDate || order.createdAt).toLocaleDateString('en-GB')}</p>
+                                <p className="text-[11px] text-gray-400 font-medium">{new Date(order.orderDate || order.createdAt).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</p>
+                            </td>
+                            <td className="p-4">
+                                {isGuest ? (
+                                    <div>
+                                        <p className="font-bold text-gray-800 text-sm">{actualGuestName}</p>
+                                        <p className="text-[11px] text-gray-500 font-medium mt-0.5">Host: {hostName}</p>
+                                    </div>
+                                ) : (
+                                    <p className="font-bold text-gray-800 text-sm">{hostName}</p>
+                                )}
+                            </td>
+                            <td className="p-4"><span className="font-mono font-bold text-blue-600 bg-blue-50/50 px-2 py-1 rounded text-[11px]">{order.voucherCode || order.facultyId?.voucherCode || "N/A"}</span></td>
+                            <td className="p-4 text-xs text-gray-500">{order.items.map(item => `${item.itemName} (x${item.quantity})`).join(', ')}</td>
+                            <td className="p-4 pr-6 md:pr-8 text-right font-black text-green-600">₹{order.totalAmount}</td>
+                          </tr>
+                        );
+                      })
                     )}
                   </tbody>
                 </table>

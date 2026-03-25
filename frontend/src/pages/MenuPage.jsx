@@ -1,23 +1,29 @@
 import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import API from '../api/axios';
-import { Utensils, LogOut, Trash2, CheckCircle, Ticket, X, UtensilsCrossed, Plus, Mail, ChevronRight, Check } from 'lucide-react';
+import { Utensils, LogOut, Trash2, CheckCircle, Ticket, X, UtensilsCrossed, Plus, Mail, ChevronRight, Check, Clock } from 'lucide-react';
+import toast from 'react-hot-toast'; // 🚀 IMPORT TOAST
+
+// =========================================================
+// 🚀 DEFINED TIME SCHEDULES FOR CATEGORIES (24-Hour Format)
+// =========================================================
+const categorySchedules = {
+  'Beverages': { start: 8, end: 11, label: 'Available 8:00 AM - 11:00 AM' },
+  'Lunch': { start: 12, end: 14, label: 'Available 12:00 PM - 2:00 PM' },
+  'Snacks': { start: 8, end: 15, label: 'Available 8:00 AM - 3:00 PM' }
+};
 
 const MenuPage = () => {
   const navigate = useNavigate();
   
-  // Initialize the tab from memory, default to 'menu'
-  const [activeTab, setActiveTab] = useState(() => {
-      return sessionStorage.getItem('activeMenuTab') || 'menu';
-  });
-  // Automatically save the tab to memory whenever it changes
+  const [activeTab, setActiveTab] = useState(() => sessionStorage.getItem('activeMenuTab') || 'menu');
+  
   useEffect(() => {
       sessionStorage.setItem('activeMenuTab', activeTab);
   }, [activeTab]);
+  
   const [menuItems, setMenuItems] = useState([]); 
   const [myGuests, setMyGuests] = useState([]); 
-  
-  // Store selections by category instead of an array
   const [selections, setSelections] = useState({});
   const [loading, setLoading] = useState(false);
   const [orderSuccess, setOrderSuccess] = useState(false);
@@ -32,6 +38,9 @@ const MenuPage = () => {
   const voucher = sessionStorage.getItem('userVoucher') || 'Unknown';
   const userName = sessionStorage.getItem('userName') || 'User';
   const userRole = sessionStorage.getItem('userRole') || 'GUEST'; 
+
+  // Get current hour for time checks
+  const currentHour = new Date().getHours();
 
   useEffect(() => {
     if (voucher === 'Unknown') {
@@ -56,20 +65,22 @@ const MenuPage = () => {
       } catch (err) { console.error("Guest fetch error", err); }
   };
 
-  // --- COMBO SELECTION LOGIC ---
   const toggleSelection = (item) => {
-    // 🚀 THE FIX 1: Don't allow clicking if out of stock!
-    if (item.isAvailable === false) return;
-
     const category = item.category || 'Other';
+    
+    // 🚀 TIME CHECK: Prevent selecting items outside their schedule
+    const schedule = categorySchedules[category];
+    const isTimeValid = schedule ? (currentHour >= schedule.start && currentHour < schedule.end) : true;
+
+    if (item.isAvailable === false || !isTimeValid) {
+        return; // UI already greys it out
+    }
+
     setSelections((prev) => {
       const currentSelections = { ...prev };
-      
-      // If clicking the exact same item, deselect it
       if (currentSelections[category]?._id === item._id) {
         delete currentSelections[category];
       } else {
-        // Otherwise, replace whatever was in this category with the new item
         currentSelections[category] = item;
       }
       return currentSelections;
@@ -84,11 +95,9 @@ const MenuPage = () => {
     });
   };
 
-  // Convert selections object into an array for the summary and backend
   const selectedItemsList = Object.values(selections);
   const totalAmount = selectedItemsList.reduce((acc, item) => acc + (item.price || 0), 0);
 
-  // Group menu items by category for the UI
   const groupedMenu = menuItems.reduce((acc, item) => {
       const cat = item.category || 'Other';
       if (!acc[cat]) acc[cat] = [];
@@ -97,6 +106,16 @@ const MenuPage = () => {
   }, {});
 
   const handleCheckout = async () => {
+    // 🚀 SECURITY CHECK: Re-verify times right before checkout 
+    const exactHour = new Date().getHours();
+    for (const item of selectedItemsList) {
+        const schedule = categorySchedules[item.category];
+        if (schedule && (exactHour < schedule.start || exactHour >= schedule.end)) {
+            toast.error(`Checkout failed: ${item.category} is only ${schedule.label.toLowerCase()}. Please remove it from your selection.`); // 🚀 TOAST
+            return;
+        }
+    }
+
     setLoading(true);
     try {
       const orderData = {
@@ -111,9 +130,10 @@ const MenuPage = () => {
       };
       await API.post('/orders/place', orderData);
       setOrderSuccess(true);
-      setSelections({}); // Clear selections
+      setSelections({});
+      toast.success("Order Placed Successfully!"); // 🚀 TOAST
       setTimeout(() => setOrderSuccess(false), 3000);
-    } catch (err) { alert(err.response?.data?.error || "Order failed. You may have already ordered today."); } 
+    } catch (err) { toast.error(err.response?.data?.error || "Order failed. You may have already ordered today."); } // 🚀 TOAST
     finally { setLoading(false); }
   };
 
@@ -121,11 +141,11 @@ const MenuPage = () => {
     e.preventDefault();
     try {
         const res = await API.post('/guests/add', { ...guestFormData, facultyVoucher: voucher });
-        alert(`Success! Hand this code to your guest: ${res.data.voucher}`);
+        toast.success(`Success! Hand this code to your guest: ${res.data.voucher}`); // 🚀 TOAST
         setIsGuestModalOpen(false);
         setGuestFormData({ guestName: '', email: '', validFrom: new Date().toISOString().split('T')[0], validTill: new Date().toISOString().split('T')[0] });
         fetchMyGuests(); 
-    } catch (err) { alert(`Failed to add guest: ${err.response?.data?.error || err.message}`); }
+    } catch (err) { toast.error(`Failed to add guest: ${err.response?.data?.error || err.message}`); } // 🚀 TOAST
   };
 
   return (
@@ -183,15 +203,27 @@ const MenuPage = () => {
           {activeTab === 'menu' && (
             <div className="flex flex-col lg:flex-row gap-6 items-start">
                 
-                {/* Menu Layout Grouped By Category */}
                 <div className="flex-[2] w-full">
                 {Object.keys(groupedMenu).length > 0 ? (
-                    Object.entries(groupedMenu).map(([category, items]) => (
+                    Object.entries(groupedMenu).map(([category, items]) => {
+                        const schedule = categorySchedules[category];
+                        const isTimeValid = schedule ? (currentHour >= schedule.start && currentHour < schedule.end) : true;
+
+                        return (
                         <div key={category} className="mb-8">
-                            <h3 className="text-sm font-black text-slate-400 uppercase tracking-widest border-b border-slate-200 pb-2 mb-4">Select {category}</h3>
+                            <div className="flex justify-between items-end border-b border-slate-200 pb-2 mb-4">
+                                <h3 className="text-sm font-black text-slate-400 uppercase tracking-widest">Select {category}</h3>
+                                
+                                {schedule && (
+                                    <div className={`flex items-center gap-1 px-2 py-1 rounded text-[10px] font-bold uppercase tracking-wider ${isTimeValid ? 'text-emerald-600 bg-emerald-50 border border-emerald-100' : 'text-orange-600 bg-orange-50 border border-orange-100'}`}>
+                                        <Clock size={12} /> {schedule.label}
+                                    </div>
+                                )}
+                            </div>
+                            
                             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                                 {items.map((item) => {
-                                    const isAvailable = item.isAvailable !== false; // 🚀 THE FIX 2: Check availability
+                                    const isAvailable = (item.isAvailable !== false) && isTimeValid; 
                                     const isSelected = selections[category]?._id === item._id;
 
                                     return (
@@ -210,8 +242,7 @@ const MenuPage = () => {
                                                         !isAvailable ? 'text-slate-500 line-through' :
                                                         isSelected ? 'text-blue-900' : 'text-slate-800'
                                                     }`}>{item.itemName}</h3>
-                                                    {/* 🚀 THE FIX 3: Add out of stock badge */}
-                                                    {!isAvailable && <span className="text-[9px] font-black text-red-500 bg-red-50 border border-red-100 px-1.5 py-0.5 rounded uppercase tracking-wider">Out of Stock</span>}
+                                                    {item.isAvailable === false && <span className="text-[9px] font-black text-red-500 bg-red-50 border border-red-100 px-1.5 py-0.5 rounded uppercase tracking-wider">Out of Stock</span>}
                                                 </div>
                                                 <p className={`font-bold text-base md:text-lg mt-0.5 ${
                                                     !isAvailable ? 'text-slate-400' :
@@ -223,7 +254,6 @@ const MenuPage = () => {
                                                 isSelected ? 'bg-blue-600 border-blue-600 text-white' : 
                                                 'bg-slate-50 border-slate-200 text-slate-400 group-hover:border-blue-300 group-hover:text-blue-500'
                                             }`}>
-                                                {/* 🚀 THE FIX 4: Change icon based on availability */}
                                                 {!isAvailable ? <X size={16} /> : isSelected ? <Check size={16} /> : <Plus size={16} />}
                                             </div>
                                         </div>
@@ -231,7 +261,7 @@ const MenuPage = () => {
                                 })}
                             </div>
                         </div>
-                    ))
+                    )})
                 ) : (
                     <div className="bg-white p-8 rounded-xl border border-dashed border-slate-300 text-center"><p className="text-slate-500 text-sm font-medium">No menu items available.</p></div>
                 )}

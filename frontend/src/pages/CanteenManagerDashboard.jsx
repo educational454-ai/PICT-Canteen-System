@@ -4,6 +4,7 @@ import API from '../api/axios';
 import { Download, Printer, Plus, Edit, Trash2, LogOut, Utensils, CheckCircle2, XCircle, Power, PowerOff } from 'lucide-react';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
+import toast from 'react-hot-toast'; // 🚀 IMPORT TOAST
 
 // Helper function to get strict LOCAL time
 const getLocalYYYYMMDD = (dateObj = new Date()) => {
@@ -13,10 +14,17 @@ const getLocalYYYYMMDD = (dateObj = new Date()) => {
   return `${year}-${month}-${day}`;
 };
 
+// 🚀 NEW: Define the strict price limits for each category
+const categoryPriceLimits = {
+    'Beverages': 30,
+    'Snacks': 50,
+    'Dessert': 50,
+    'Lunch': 100
+};
+
 const CanteenManagerDashboard = () => {
   const navigate = useNavigate();
   
-  // 🚀 UPGRADE: Remember the active tab using sessionStorage!
   const [activeTab, setActiveTab] = useState(() => sessionStorage.getItem('managerTab') || 'orders'); 
   const [orders, setOrders] = useState([]);
   const [departments, setDepartments] = useState([]);
@@ -38,7 +46,6 @@ const CanteenManagerDashboard = () => {
     fetchMenuItems();
   }, []);
 
-  // Save tab state on change
   useEffect(() => {
       sessionStorage.setItem('managerTab', activeTab);
   }, [activeTab]);
@@ -80,19 +87,31 @@ const CanteenManagerDashboard = () => {
       return true;
   });
 
-  const handleMenuSubmit = async (e) => {
+const handleMenuSubmit = async (e) => {
       e.preventDefault();
+
+      const maxAllowedPrice = categoryPriceLimits[menuForm.category];
+      if (maxAllowedPrice && Number(menuForm.price) > maxAllowedPrice) {
+          // 🚀 REPLACE ALERT WITH TOAST.ERROR
+          toast.error(`Max price for ${menuForm.category} is ₹${maxAllowedPrice}.`);
+          return; 
+      }
+
       try {
           if (editingItemId) {
               await API.put(`/menu/update/${editingItemId}`, menuForm);
+              toast.success("Item updated successfully!"); // 🚀 ADD SUCCESS TOAST
           } else {
               await API.post('/menu/add', menuForm);
+              toast.success("New item added to menu!"); // 🚀 ADD SUCCESS TOAST
           }
           setIsMenuModalOpen(false);
           setMenuForm({ itemName: '', category: 'Snacks', price: '' });
           setEditingItemId(null);
           fetchMenuItems();
-      } catch (err) { alert(`Failed to save: ${err.response?.data?.error || err.message}`); }
+      } catch (err) { 
+          toast.error(err.response?.data?.error || "Failed to save item."); 
+      }
   };
 
   const editMenuItem = (item) => {
@@ -103,12 +122,16 @@ const CanteenManagerDashboard = () => {
 
   const deleteMenuItem = async (id) => {
       if(window.confirm("Are you sure you want to permanently delete this item?")) {
-          try { await API.delete(`/menu/delete/${id}`); fetchMenuItems(); } 
-          catch (err) { alert("Failed to delete item."); }
+          try { 
+              await API.delete(`/menu/delete/${id}`); 
+              toast.success("Item deleted."); // 🚀 SUCCESS TOAST
+              fetchMenuItems(); 
+          } catch (err) { 
+              toast.error("Failed to delete item."); // 🚀 ERROR TOAST
+          }
       }
-  };
+};
 
-  // 🚀 UPGRADE: Quick toggle for "Out of Stock"
   const toggleAvailability = async (item) => {
       try {
           await API.put(`/menu/update/${item._id}`, { ...item, isAvailable: !item.isAvailable });
@@ -149,7 +172,6 @@ const CanteenManagerDashboard = () => {
         doc.text(refNo, 14, 50);
         doc.text(dateRangeText, 140, 50);
         doc.setFont("helvetica", "bold");
-        // 🚀 BONUS FIX: Stop it from saying "ALL DEPARTMENTS DEPARTMENT"
         const deptTitle = filterDept === 'All Departments' 
             ? "ALL DEPARTMENTS" 
             : `${filterDept.toUpperCase()} DEPARTMENT`;
@@ -252,13 +274,20 @@ const CanteenManagerDashboard = () => {
         doc.text("CEO", 60, signatureY + 31);
         doc.line(135, signatureY + 25, 175, signatureY + 25);
         doc.text("PRINCIPAL", 148, signatureY + 31);
+        
+        // 🚀 THE FIX: Adding the exact download Date and Time to the footer
         doc.setFont("helvetica", "normal");
         doc.setFontSize(7);
-        doc.text("SYSTEM GENERATED REPORT | PICT CANTEEN & MESS SECTION", 65, pageHeight - 5);
+        const downloadTime = new Date().toLocaleString('en-GB', {
+            day: '2-digit', month: 'short', year: 'numeric', 
+            hour: '2-digit', minute: '2-digit', hour12: true
+        });
+        doc.text(`SYSTEM GENERATED REPORT | PICT CANTEEN & MESS SECTION | DOWNLOADED: ${downloadTime.toUpperCase()}`, 48, pageHeight - 5);
 
         doc.save(`Canteen_Report_${filterDept.replace(/\s+/g, '_')}_${startDate}.pdf`);
+        toast.success("PDF Report Downloaded!"); // 🚀 SUCCESS TOAST
       };
-      img.onerror = () => { alert("Failed to load watermark image."); };
+      img.onerror = () => { toast.error("Failed to load watermark image."); };
   };
 
   const printReceipt = (order) => {
@@ -409,7 +438,6 @@ const CanteenManagerDashboard = () => {
 
                       <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-5">
                           {menuItems.map(item => {
-                              // Fallback if the database doesn't have isAvailable yet (defaults to true)
                               const isAvailable = item.isAvailable !== false; 
                               
                               return (
@@ -427,7 +455,6 @@ const CanteenManagerDashboard = () => {
                                   </div>
                                   
                                   <div className="flex flex-col gap-2 relative z-10">
-                                      {/* THE STOCK TOGGLE BUTTON */}
                                       <button onClick={() => toggleAvailability(item)} className={`p-2.5 rounded-xl transition-all shadow-sm ${isAvailable ? 'bg-white border border-slate-200 text-red-500 hover:bg-red-50 hover:border-red-200' : 'bg-emerald-500 text-white shadow-emerald-200 hover:bg-emerald-600'}`} title={isAvailable ? "Mark Out of Stock" : "Mark In Stock"}>
                                           {isAvailable ? <PowerOff size={18}/> : <Power size={18}/>}
                                       </button>
@@ -468,7 +495,12 @@ const CanteenManagerDashboard = () => {
                           </select>
                       </div>
                       <div>
-                          <label className="block text-[11px] font-black text-slate-400 uppercase tracking-widest mb-2">Price (₹)</label>
+                          <div className="flex justify-between items-end mb-2">
+                              <label className="block text-[11px] font-black text-slate-400 uppercase tracking-widest">Price (₹)</label>
+                              <span className="text-[10px] font-bold text-blue-500 bg-blue-50 px-2 py-0.5 rounded">
+                                  Max: ₹{categoryPriceLimits[menuForm.category] || 'N/A'}
+                              </span>
+                          </div>
                           <input required type="number" placeholder="0" value={menuForm.price} onChange={(e) => setMenuForm({...menuForm, price: e.target.value})} className="w-full p-3.5 bg-slate-50 border-2 border-slate-100 rounded-xl font-bold text-slate-700 outline-none focus:border-blue-500 focus:bg-white transition-all" />
                       </div>
                       <div className="flex gap-3 mt-8 pt-4 border-t border-slate-100">
